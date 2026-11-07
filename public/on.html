@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Huawei MA5800-X7 Web Management</title>
+  <style>
+    :root {
+      --bg-color: #1a1d24;
+      --card-bg: #242832;
+      --slot-bg: #15171e;
+      --text-muted: #8a94a6;
+      --text-light: #e2e8f0;
+      --active-green: #00e676;
+      --inactive-gray: #4a5568;
+      --power-red: #ff5252;
+      --control-blue: #29b6f6;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-light);
+      padding: 20px;
+    }
+
+    .olt-subrack {
+      background: var(--card-bg);
+      border: 2px solid #333b4d;
+      border-radius: 8px;
+      padding: 16px;
+      max-width: 1100px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+
+    .olt-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #333b4d;
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+    }
+
+    .olt-title h2 {
+      margin: 0;
+      font-size: 18px;
+      color: #fff;
+    }
+
+    .badge {
+      background: #333b4d;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Layout Slot Vertikal / Horizontal MA5800-X7 */
+    .slots-container {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 8px;
+      background: var(--slot-bg);
+      padding: 12px;
+      border-radius: 6px;
+    }
+
+    .slot-card {
+      background: #1c2029;
+      border: 1px solid #2d3342;
+      border-radius: 4px;
+      padding: 8px 4px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 220px;
+    }
+
+    .slot-card.active-slot {
+      border: 1px solid var(--active-green);
+      box-shadow: 0 0 10px rgba(0, 230, 118, 0.2);
+    }
+
+    .slot-card.control-board {
+      border-top: 3px solid var(--control-blue);
+    }
+
+    .slot-card.power-board {
+      border-top: 3px solid var(--power-red);
+    }
+
+    .slot-header {
+      font-size: 11px;
+      font-weight: bold;
+      color: var(--text-muted);
+      border-bottom: 1px solid #2d3342;
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+    }
+
+    .port-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 4px;
+      justify-items: center;
+    }
+
+    /* Tampilan Port SFP/PON */
+    .port-box {
+      width: 22px;
+      height: 14px;
+      background: #0d0f14;
+      border: 1px solid #3a4254;
+      border-radius: 2px;
+      position: relative;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .port-box:hover {
+      border-color: #fff;
+    }
+
+    .port-box.active {
+      border-color: var(--active-green);
+      background: #0a2918;
+    }
+
+    .port-led {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--inactive-gray);
+    }
+
+    .port-box.active .port-led {
+      background: var(--active-green);
+      box-shadow: 0 0 5px var(--active-green);
+    }
+
+    .slot-footer {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="olt-subrack">
+    <!-- Header Web Management -->
+    <div class="olt-title">
+      <h2>Huawei SmartAX MA5800-X7 <span class="badge">Frame 0</span></h2>
+      <div>Selected: <strong>Slot 2 / Port 3</strong></div>
+    </div>
+
+    <!-- Layout 12 Slot MA5800-X7 -->
+    <div class="slots-container">
+
+      <!-- Slot 0: GPIO -->
+      <div class="slot-card">
+        <div class="slot-header">Slot 0</div>
+        <span style="font-size: 9px; color: #666;">GPIO</span>
+        <div class="slot-footer">AUX</div>
+      </div>
+
+      <!-- Slot 1: Service (16 GPON) -->
+      <div class="slot-card">
+        <div class="slot-header">Slot 1</div>
+        <div class="port-grid">
+          <!-- 16 Port Dummy -->
+          <div class="port-box" title="Port 0"><div class="port-led"></div></div>
+          <div class="port-box" title="Port 1"><div class="port-led"></div></div>
+          <div class="port-box" title="Port 2"><div class="port-led"></div></div>
+          <div class="port-box" title="Port 3"><div class="port-led"></div></div>
+          <div class="port-box" title="Port 4"><div class="port-led"></div></div>
+          <div class="port-box" title="Port 5"><div class="port-led"></div></div>
+          <div class="port-box" title="Port 6"><div class="port-led"></div></div>
+          <div class="port-box" title="Port 7"><div class="port-led"></div></div>
+        </div>
+        <div class="slot-footer">GPHF</div>
+      </div>
+
+      <!-- Slot 2: Active Service Board (Target Slot) -->
+      <div class="slot-card active-slot">
+        <div class="slot-header" style="color: var(--active-green);">Slot 2</div>
+        <div class="port-grid">
+          <div class="port-box" title="Slot 2 / Port 0"><div class="port-led"></div></div>
+          <div class="port-box" title="Slot 2 / Port 1"><div class="port-led"></div></div>
+          <div class="port-box" title="Slot 2 / Port 2"><div class="port-led"></div></div>
+          <!-- Port 3 Active Highlight -->
+          <div class="port-box active" title="Slot 2 / Port 3 (Active)"><div class="port-led"></div></div>
+          <div class="port-box" title="Slot 2 / Port 4"><div class="port-led"></div></div>
+          <div class="port-box" title="Slot 2 / Port 5"><div class="port-led"></div></div>
+          <div class="port-box" title="Slot 2 / Port 6"><div class="port-led"></div></div>
+          <div class="port-box" title="Slot 2 / Port 7"><div class="port-led"></div></div>
+        </div>
+        <div class="slot-footer" style="color: #fff;">GPHF</div>
+      </div>
+
+      <!-- Slot 3 - 7: Service Slots -->
+      <div class="slot-card"><div class="slot-header">Slot 3</div><div class="slot-footer">GPHF</div></div>
+      <div class="slot-card"><div class="slot-header">Slot 4</div><div class="slot-footer">GPHF</div></div>
+      <div class="slot-card"><div class="slot-header">Slot 5</div><div class="slot-footer">GPHF</div></div>
+      <div class="slot-card"><div class="slot-header">Slot 6</div><div class="slot-footer">GPHF</div></div>
+      <div class="slot-card"><div class="slot-header">Slot 7</div><div class="slot-footer">GPHF</div></div>
+
+      <!-- Slot 8 & 9: Control Board (MPU) -->
+      <div class="slot-card control-board">
+        <div class="slot-header">Slot 8</div>
+        <span style="font-size: 10px; color: var(--control-blue);">MPLA</span>
+        <div class="slot-footer">Control (Active)</div>
+      </div>
+      <div class="slot-card control-board">
+        <div class="slot-header">Slot 9</div>
+        <span style="font-size: 10px; color: var(--control-blue);">MPLA</span>
+        <div class="slot-footer">Control (Standby)</div>
+      </div>
+
+      <!-- Slot 10 & 11: Power Board -->
+      <div class="slot-card power-board">
+        <div class="slot-header">Slot 10</div>
+        <span style="font-size: 10px; color: var(--power-red);">PILA</span>
+        <div class="slot-footer">PWR 1</div>
+      </div>
+      <div class="slot-card power-board">
+        <div class="slot-header">Slot 11</div>
+        <span style="font-size: 10px; color: var(--power-red);">PILA</span>
+        <div class="slot-footer">PWR 2</div>
+      </div>
+
+    </div>
+
+    <!-- Legend Indikator -->
+    <div class="legend">
+      <div class="legend-item"><div class="dot" style="background: var(--active-green);"></div> Port Active / Selected (Port 3)</div>
+      <div class="legend-item"><div class="dot" style="background: var(--inactive-gray);"></div> Port Inactive</div>
+      <div class="legend-item"><div class="dot" style="background: var(--control-blue);"></div> Control Board (Slot 8-9)</div>
+      <div class="legend-item"><div class="dot" style="background: var(--power-red);"></div> Power Board (Slot 10-11)</div>
+    </div>
+  </div>
+
+</body>
+</html>
