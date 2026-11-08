@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use phpseclib3\Net\SSH2;
-use App\Models\OntTypeMapping;
+use phpseclib3\Crypt\PublicKeyLoader;
 use App\Models\Olt;
 use App\Models\OltSnmpSnapshot;
 use Illuminate\Support\Facades\Log;
@@ -69,7 +69,7 @@ class OltService
 
         foreach (self::SNMP_OIDS as $name => $oid) {
             $error = null;
-            $value = $this->snmpWalk($peer, $olt->username, $oid, $timeout, $retries, $error);
+            $value = $this->snmpWalk($peer, $olt->snmp_community ?: $olt->username, $oid, $timeout, $retries, $error);
             if ($value === false) {
                 $errors[$name] = $error ?: 'OID tidak merespons.';
                 continue;
@@ -148,7 +148,7 @@ class OltService
 
     private function session(Olt $olt): SSH2
     {
-        if ($olt->connection_type !== 'ssh') {
+        if (! $olt->ssh_enabled && $olt->connection_type !== 'ssh') {
             throw new \RuntimeException("OLT {$olt->name} bukan koneksi SSH.");
         }
         if ($olt->transport_type !== 'tcp') {
@@ -164,11 +164,11 @@ class OltService
         $this->debug('ssh.session.connecting', [
             'olt' => $olt->name,
             'host' => $olt->host,
-            'port' => $olt->port,
+            'port' => $olt->ssh_port ?: $olt->port,
             'timeout' => config('janeta.ssh_timeout'),
         ]);
-        $ssh = new SSH2($olt->host, $olt->port, config('janeta.ssh_timeout'));
-        if (!$ssh->login($olt->username, $olt->password)) {
+        $ssh = new SSH2($olt->host, $olt->ssh_port ?: $olt->port, config('janeta.ssh_timeout'));
+        if (!$ssh->login($olt->ssh_username ?: $olt->username, $this->sshCredential($olt))) {
             $this->debug('ssh.session.login_failed', [
                 'olt' => $olt->name,
                 'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
@@ -208,12 +208,12 @@ class OltService
             $this->debug('connection.test.not_found', ['olt' => $oltName]);
             return ['ok' => false, 'message' => 'OLT tidak ditemukan.'];
         }
-        if (!$olt->host || !$olt->username) {
+        if (!$olt->host || ($olt->connection_type === 'ssh' ? ! ($olt->ssh_username ?: $olt->username) : ! ($olt->snmp_community ?: $olt->username))) {
             return $this->saveConnectionResult($olt, false, 'Konfigurasi host/username belum lengkap.');
         }
 
         try {
-            $result = $olt->connection_type === 'snmp'
+            $result = $this->activeConnectionType($olt) === 'snmp'
                 ? $this->testSnmp($olt)
                 : $this->testSsh($olt);
         } catch (\Throwable $e) {
@@ -232,17 +232,95 @@ class OltService
         return $savedResult;
     }
 
+    public function testServices(Olt $olt): array
+    {
+        $results = [];
+        foreach (['ssh', 'snmp'] as $service) {
+            if (! $olt->{$service.'_enabled'}) {
+                $olt->update([$service.'_status' => 'off']);
+                $results[$service] = ['ok' => false, 'message' => 'Service tidak aktif.'];
+                continue;
+            }
+
+            $caughtException = false;
+            try {
+                $result = $service === 'ssh' ? $this->testSsh($olt) : $this->testSnmp($olt);
+            } catch (\Throwable $exception) {
+                $caughtException = true;
+                $this->close($olt->name);
+                $result = ['ok' => false, 'message' => $exception->getMessage()];
+                Log::error('OLT service connection failed', [
+                    'olt' => $olt->name,
+                    'service' => strtoupper($service),
+                    'host' => $olt->host,
+                    'port' => $service === 'ssh' ? ($olt->ssh_port ?: $olt->port) : ($olt->snmp_port ?: $olt->port),
+                    'username' => $service === 'ssh' ? ($olt->ssh_username ?: $olt->username) : null,
+                    'reason' => $exception->getMessage(),
+                    'exception' => $exception::class,
+                ]);
+            }
+
+            $results[$service] = $result;
+            if (! $result['ok'] && ! $caughtException) {
+                Log::error('OLT service connection rejected', [
+                    'olt' => $olt->name,
+                    'service' => strtoupper($service),
+                    'host' => $olt->host,
+                    'port' => $service === 'ssh' ? ($olt->ssh_port ?: $olt->port) : ($olt->snmp_port ?: $olt->port),
+                    'username' => $service === 'ssh' ? ($olt->ssh_username ?: $olt->username) : null,
+                    'reason' => $result['message'],
+                ]);
+            }
+            $olt->update([
+                $service.'_status' => $result['ok'] ? 'up' : 'down',
+                $service.'_last_checked_at' => now(),
+                $service.'_last_error' => $result['ok'] ? null : $result['message'],
+            ]);
+        }
+
+        $activeResults = collect($results)->filter(fn (array $result, string $service): bool => $olt->{$service.'_enabled'});
+        $overallOk = $activeResults->isNotEmpty() && $activeResults->every(fn (array $result): bool => $result['ok']);
+        $firstFailure = $activeResults->first(fn (array $result): bool => ! $result['ok']);
+        $olt->update([
+            'status' => $overallOk ? 'online' : 'offline',
+            'last_error' => $overallOk ? null : ($firstFailure['message'] ?? 'Tidak ada service aktif.'),
+            'last_checked_at' => now(),
+        ]);
+
+        return $results;
+    }
+
     private function testSsh(Olt $olt): array
     {
         if ($olt->transport_type !== 'tcp') {
+            Log::error('OLT SSH connection rejected: invalid transport', [
+                'olt' => $olt->name,
+                'host' => $olt->host,
+                'port' => $olt->ssh_port ?: $olt->port,
+                'transport' => $olt->transport_type,
+                'reason' => 'SSH requires TCP transport.',
+            ]);
+
             return ['ok' => false, 'message' => 'Koneksi SSH harus menggunakan transport TCP.'];
         }
 
-        $ssh = new SSH2($olt->host, $olt->port, min((int) config('janeta.ssh_timeout'), 5));
-        $ok = $ssh->login($olt->username, $olt->password);
+        $port = $olt->ssh_port ?: $olt->port;
+        $username = $olt->ssh_username ?: $olt->username;
+        $this->debug('ssh.connection.testing', [
+            'olt' => $olt->name,
+            'host' => $olt->host,
+            'port' => $port,
+            'username' => $username,
+        ]);
+        $ssh = new SSH2($olt->host, $port, min((int) config('janeta.ssh_timeout'), 5));
+        $ok = $ssh->login($username, $this->sshCredential($olt));
         $ssh->disconnect();
 
-        return ['ok' => $ok, 'message' => $ok ? 'SSH login berhasil.' : 'Login SSH gagal.'];
+        $message = $ok
+            ? 'SSH login berhasil.'
+            : "Login SSH gagal ke {$olt->host}:{$port}. Periksa port SSH, username, password/private key, dan firewall.";
+
+        return ['ok' => $ok, 'message' => $message];
     }
 
     private function testSnmp(Olt $olt): array
@@ -261,6 +339,19 @@ class OltService
                 ? 'Koneksi SNMP berhasil.'
                 : ($error ?: 'SNMP tidak merespons. Cek community, versi SNMP, ACL, dan port.'),
         ];
+    }
+
+    private function activeConnectionType(Olt $olt): string
+    {
+        if ($olt->snmp_enabled) {
+            return 'snmp';
+        }
+
+        if ($olt->ssh_enabled) {
+            return 'ssh';
+        }
+
+        return $olt->connection_type;
     }
 
     private function saveConnectionResult(Olt $olt, bool $ok, string $message): array
@@ -410,10 +501,7 @@ class OltService
             'descriptionTarget' => $id,
         ]);
         $equipment = preg_match('/Equipment-ID\s*:\s*([^\r\n]+)/i', $raw, $e) ? trim($e[1]) : '-';
-        $mapping = OntTypeMapping::query()
-            ->get()
-            ->first(fn (OntTypeMapping $candidate) => str_contains($equipment, $candidate->equipment_id));
-        $result = array_merge($details, ['idcust' => $id, 'sn' => $m[3], 'frame' => $frame, 'slot' => $slot, 'port' => $port, 'ontId' => $m[2], 'brand' => $mapping?->brand ?? 'Unknown', 'type' => $mapping?->equipment_id ?? $equipment, 'wlanType' => $mapping?->wlan_band ?? 'Unknown']);
+        $result = array_merge($details, ['idcust' => $id, 'sn' => $m[3], 'frame' => $frame, 'slot' => $slot, 'port' => $port, 'ontId' => $m[2], 'brand' => 'Unknown', 'type' => $equipment, 'wlanType' => 'Unknown']);
         $this->close($found[0]);
         return $result;
     }
@@ -437,7 +525,7 @@ class OltService
             'port_count' => $portCount,
         ]);
         $record = Olt::where('name', strtoupper($olt))->where('is_active', true)->first();
-        if ($record?->connection_type === 'snmp') {
+        if ($record && $this->activeConnectionType($record) === 'snmp') {
             return $this->scanSnmpPorts($record, $frame, $slot, $portCount);
         }
 
@@ -492,7 +580,7 @@ class OltService
             throw new \RuntimeException("OLT {$olt} tidak aktif atau tidak ditemukan.");
         }
 
-        if ($record->connection_type === 'snmp') {
+        if ($this->activeConnectionType($record) === 'snmp') {
             return $this->scanAllSnmpPorts($record, $frame, $slotCount, $portCount);
         }
 
@@ -604,7 +692,7 @@ class OltService
         $timeout = (int) config('janeta.snmp_timeout');
         $retries = (int) config('janeta.snmp_retries');
         $vendorError = null;
-        $vendorStatuses = $this->snmpWalk($peer, $olt->username, self::HUAWEI_GPON_PORT_STATUS_OID, $timeout, $retries, $vendorError);
+        $vendorStatuses = $this->snmpWalk($peer, $olt->snmp_community ?: $olt->username, self::HUAWEI_GPON_PORT_STATUS_OID, $timeout, $retries, $vendorError);
         if ($vendorStatuses !== false && $vendorStatuses !== []) {
             $this->debug('snmp.gpon_scan.vendor_result', [
                 'olt' => $olt->name,
@@ -622,12 +710,12 @@ class OltService
         ]);
 
         $descriptionError = null;
-        $descriptions = $this->snmpWalk($peer, $olt->username, self::INTERFACE_DESCRIPTION_OID, $timeout, $retries, $descriptionError);
+        $descriptions = $this->snmpWalk($peer, $olt->snmp_community ?: $olt->username, self::INTERFACE_DESCRIPTION_OID, $timeout, $retries, $descriptionError);
         if ($descriptions === false) {
             throw new \RuntimeException($vendorError ?: $descriptionError ?: 'SNMP tidak merespons saat membaca daftar port.');
         }
         $statusError = null;
-        $statuses = $this->snmpWalk($peer, $olt->username, self::INTERFACE_STATUS_OID, $timeout, $retries, $statusError);
+        $statuses = $this->snmpWalk($peer, $olt->snmp_community ?: $olt->username, self::INTERFACE_STATUS_OID, $timeout, $retries, $statusError);
         if ($statuses === false) {
             throw new \RuntimeException($statusError ?: 'SNMP tidak merespons saat membaca status interface.');
         }
@@ -751,7 +839,7 @@ class OltService
         try {
             $result = snmp2_get(
                 $peer,
-                $olt->username,
+                $olt->snmp_community ?: $olt->username,
                 $oid,
                 (int) config('janeta.snmp_timeout'),
                 (int) config('janeta.snmp_retries'),
@@ -774,9 +862,18 @@ class OltService
 
     private function snmpPeer(Olt $olt): string
     {
-        return $olt->transport_type === 'udp'
-            ? "{$olt->host}:{$olt->port}"
-            : "tcp:{$olt->host}:{$olt->port}";
+        $port = $olt->snmp_port ?: $olt->port;
+
+        return "{$olt->host}:{$port}";
+    }
+
+    private function sshCredential(Olt $olt): string|\phpseclib3\Crypt\Common\PrivateKey
+    {
+        if ($olt->ssh_private_key) {
+            return PublicKeyLoader::load($olt->ssh_private_key);
+        }
+
+        return $olt->ssh_password ?: $olt->password;
     }
 
     private function debug(string $event, array $context = []): void

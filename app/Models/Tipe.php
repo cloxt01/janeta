@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Tipe extends Model
 {
-    protected $table = 'tbl_tipe';
+    protected $table = 'ont_types';
 
     protected $fillable = ['merek_id', 'nama'];
 

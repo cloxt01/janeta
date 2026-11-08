@@ -8,4 +8,4 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('janeta:collect-snmp')->everyMinute()->withoutOverlapping();
+Schedule::command('janeta:collect-snmp')->everyFiveMinutes()->withoutOverlapping();

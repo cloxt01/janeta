@@ -29,33 +29,5 @@ class DatabaseSeeder extends Seeder
             ['chat_id' => '-1004398438467', 'name' => 'Group NOC', 'is_admin' => false],
         ], ['chat_id'], ['name', 'is_admin']);
 
-        $merek = collect(['Huawei', 'TP-Link', 'CData'])->mapWithKeys(
-            fn (string $nama) => [$nama => \App\Models\Merek::firstOrCreate(['nama' => $nama])],
-        );
-
-        $mappings = [
-            ['equipment_id' => 'HG8145V5', 'brand' => 'Huawei', 'wlan_band' => 'Dual Band 2.4G/5G'],
-            ['equipment_id' => 'EG8245H5', 'brand' => 'Huawei', 'wlan_band' => 'Single Band 2.4G'],
-            ['equipment_id' => 'EG8141H5', 'brand' => 'Huawei', 'wlan_band' => 'Single Band 2.4G'],
-            ['equipment_id' => 'XC220-G3', 'brand' => 'TP-Link', 'wlan_band' => 'Dual Band 2.4G/5G'],
-            ['equipment_id' => 'FD511GD', 'brand' => 'CData', 'wlan_band' => 'Dual Band 2.4G/5G'],
-        ];
-
-        foreach ($mappings as $mapping) {
-            $tipe = \App\Models\Tipe::firstOrCreate([
-                'merek_id' => $merek[$mapping['brand']]->id,
-                'nama' => $mapping['equipment_id'],
-            ]);
-
-            \App\Models\OntTypeMapping::updateOrCreate(
-                ['equipment_id' => $mapping['equipment_id']],
-                [
-                    'brand' => $mapping['brand'],
-                    'merek_id' => $tipe->merek_id,
-                    'tipe_id' => $tipe->id,
-                    'wlan_band' => $mapping['wlan_band'],
-                ],
-            );
-        }
     }
 }

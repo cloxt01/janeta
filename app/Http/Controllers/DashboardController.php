@@ -117,7 +117,7 @@ class DashboardController extends Controller
             $this->audit($request, 'olt.port_monitor', 'Port Monitor dijalankan untuk '.$oltName.' frame '.$frame.'.', $olts->firstWhere('name', $oltName));
             try {
                 $device = $olts->firstWhere('name', $oltName);
-                if ($device?->connection_type === 'snmp') {
+                if ($device?->snmp_enabled || $device?->connection_type === 'snmp') {
                     $snapshot = app(OltService::class)->latestSnmpSnapshot($device, $frame);
                     $scan = $snapshot?->data['monitor'];
                     if ($scan) {
@@ -142,8 +142,10 @@ class DashboardController extends Controller
     {
         $data = $request->validate($this->oltRules($request));
         $data['name'] = strtoupper($data['name']);
+        $data = $this->normalizeOltServices($data);
         $olt = Olt::create($data);
-        $result = app(OltService::class)->testConnection($olt->name);
+        $results = app(OltService::class)->testServices($olt);
+        $result = $this->summarizeServiceResults($results);
         $this->audit($request, 'olt.created', 'OLT '.$olt->name.' ditambahkan.', $olt);
 
         return back()->with($result['ok'] ? 'success' : 'error', 'OLT berhasil ditambahkan. '.$result['message']);
@@ -157,36 +159,25 @@ class DashboardController extends Controller
 
         return [
             'name' => ['required', 'string', 'max:100', $nameRule],
-            'connection_type' => ['required', Rule::in(['ssh', 'snmp'])],
-            'transport_type' => [
-                'required',
-                Rule::in(['tcp', 'udp']),
-                function (string $attribute, mixed $value, \Closure $fail) use ($request): void {
-                    if ($request->input('connection_type') === 'ssh' && $value !== 'tcp') {
-                        $fail('Koneksi SSH hanya mendukung transport TCP.');
-                    }
-                },
-            ],
             'host' => ['required', 'string', 'max:255'],
-            'port' => ['required', 'integer', 'between:1,65535'],
-            'username' => ['required', 'string', 'max:255'],
-            'password' => [Rule::requiredIf(fn () => $request->input('connection_type') === 'ssh'), 'nullable', 'string', 'max:255'],
+            'ssh_enabled' => ['boolean'],
+            'ssh_port' => ['nullable', 'integer', 'between:1,65535'],
+            'ssh_username' => [Rule::requiredIf($request->boolean('ssh_enabled')), 'nullable', 'string', 'max:255'],
+            'ssh_password' => ['nullable', 'string'],
+            'ssh_private_key' => ['nullable', 'string'],
+            'snmp_enabled' => ['boolean'],
+            'snmp_port' => ['nullable', 'integer', 'between:1,65535'],
+            'snmp_community' => [Rule::requiredIf($request->boolean('snmp_enabled')), 'nullable', 'string', 'max:255'],
         ];
     }
 
     public function updateOlt(Request $request, Olt $olt): RedirectResponse
     {
         $rules = $this->oltRules($request, $olt);
-        $rules['password'] = ['nullable', 'string', 'max:255'];
         $rules['is_active'] = ['boolean'];
         $data = $request->validate($rules);
         $data['name'] = strtoupper($data['name']);
-        if ($data['connection_type'] === 'snmp' && $request->input('port') === '22') {
-            $data['port'] = 161;
-        }
-        if (! array_key_exists('password', $data) || $data['password'] === null || $data['password'] === '') {
-            unset($data['password']);
-        }
+        $data = $this->normalizeOltServices($data, $olt);
         $data['is_active'] = $request->boolean('is_active');
         if (! $data['is_active']) {
             $data['status'] = 'unknown';
@@ -195,10 +186,48 @@ class DashboardController extends Controller
         $olt->update($data);
         $this->audit($request, 'olt.updated', 'OLT '.$olt->name.' diperbarui.', $olt);
         $result = $data['is_active']
-            ? app(OltService::class)->testConnection($olt->name)
+            ? $this->summarizeServiceResults(app(OltService::class)->testServices($olt))
             : ['ok' => true, 'message' => 'OLT dinonaktifkan.'];
 
         return back()->with($result['ok'] ? 'success' : 'error', 'OLT berhasil diperbarui. '.$result['message']);
+    }
+
+    private function normalizeOltServices(array $data, ?Olt $olt = null): array
+    {
+        $data['ssh_enabled'] = (bool) ($data['ssh_enabled'] ?? false);
+        $data['snmp_enabled'] = (bool) ($data['snmp_enabled'] ?? false);
+        $data['ssh_port'] = (int) ($data['ssh_port'] ?? 22);
+        $data['snmp_port'] = (int) ($data['snmp_port'] ?? 161);
+        $data['transport_type'] = 'tcp';
+        $data['connection_type'] = $data['snmp_enabled'] && ! $data['ssh_enabled'] ? 'snmp' : 'ssh';
+        $data['port'] = $data['connection_type'] === 'snmp' ? $data['snmp_port'] : $data['ssh_port'];
+        $data['username'] = $data['connection_type'] === 'snmp'
+            ? ($data['snmp_community'] ?? '')
+            : ($data['ssh_username'] ?? '');
+        $data['password'] = $data['connection_type'] === 'ssh'
+            ? ($data['ssh_password'] ?? $olt?->ssh_password ?? '')
+            : '';
+
+        if ($olt && (! array_key_exists('ssh_password', $data) || $data['ssh_password'] === '')) {
+            $data['ssh_password'] = $olt->ssh_password;
+        }
+        if ($olt && (! array_key_exists('ssh_private_key', $data) || $data['ssh_private_key'] === '')) {
+            $data['ssh_private_key'] = $olt->ssh_private_key;
+        }
+
+        return $data;
+    }
+
+    private function summarizeServiceResults(array $results): array
+    {
+        $failed = collect($results)->filter(fn (array $result): bool => ! $result['ok']);
+
+        return [
+            'ok' => $failed->isEmpty(),
+            'message' => $failed->isEmpty()
+                ? 'Seluruh service aktif berhasil terhubung.'
+                : 'Service gagal: '.$failed->map(fn (array $result, string $service): string => strtoupper($service).' - '.$result['message'])->implode('; '),
+        ];
     }
 
     public function destroyOlt(Olt $olt): RedirectResponse
@@ -211,7 +240,7 @@ class DashboardController extends Controller
 
     public function testOlt(Olt $olt, OltService $service): RedirectResponse
     {
-        $result = $service->testConnection($olt->name);
+        $result = $this->summarizeServiceResults($service->testServices($olt));
         $this->audit(request(), 'olt.connection_test', 'Koneksi OLT '.$olt->name.' diuji: '.$result['message'].'.', $olt);
 
         return back()->with($result['ok'] ? 'success' : 'error', $olt->name.': '.$result['message']);
@@ -220,7 +249,7 @@ class DashboardController extends Controller
     public function testAllOlts(OltService $service): RedirectResponse
     {
         $results = Olt::where('is_active', true)->get()->mapWithKeys(
-            fn (Olt $olt) => [$olt->name => $service->testConnection($olt->name)],
+            fn (Olt $olt) => [$olt->name => $this->summarizeServiceResults($service->testServices($olt))],
         );
         $failed = $results->filter(fn (array $result) => ! $result['ok']);
         $this->audit(

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Merek extends Model
 {
-    protected $table = 'tbl_merek';
+    protected $table = 'brands';
 
     protected $fillable = ['nama'];
 
