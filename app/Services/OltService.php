@@ -481,6 +481,36 @@ class OltService
         return '-';
     }
 
+    public function setOntState(string $olt, string $frame, string $slot, string $port, string $ontId, bool $activate): array
+    {
+        $action = $activate ? 'activate' : 'deactivate';
+        $this->debug("ssh.ont_{$action}.started", compact('olt', 'frame', 'slot', 'port', 'ontId'));
+
+        try {
+            $this->command($olt, 'config');
+            $this->command($olt, "interface gpon {$frame}/{$slot}");
+            $output = $this->command($olt, "ont {$action} {$port} {$ontId}") ?? '';
+
+            if (preg_match('/(Failure|Error|Parameter error|Unknown command)/i', $output)) {
+                return ['ok' => false, 'message' => 'OLT menolak perintah: ' . trim(preg_replace('/\s+/', ' ', $output))];
+            }
+
+            // Verifikasi Control flag
+            $this->command($olt, 'quit');
+            $info = $this->command($olt, "display ont info {$frame} {$slot} {$port} {$ontId}") ?? '';
+            $flag = preg_match('/Control\s*flag\s*:\s*(\w+)/i', $info, $m) ? strtolower($m[1]) : null;
+
+            $expected = $activate ? 'active' : 'deactive';
+            $ok = $flag === null || $flag === $expected;
+
+            return [
+                'ok' => $ok,
+                'message' => $flag ? "Control flag: {$flag}" : 'Perintah terkirim (status belum bisa diverifikasi).',
+            ];
+        } finally {
+            $this->close($olt);
+        }
+    }
     public function apiVersion(string $id): ?array
     {
         $id = trim($id);
