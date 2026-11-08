@@ -9,7 +9,7 @@ use RuntimeException;
 
 class TelegramClient
 {
-    private function request(string $method): PendingRequest
+    private function request(string $method, int $timeout = 60): PendingRequest
     {
         $token = config('janeta.telegram.token');
         if (!$token) {
@@ -17,22 +17,52 @@ class TelegramClient
         }
 
         return Http::baseUrl(rtrim(config('janeta.telegram.api_url'), '/') . '/bot' . $token)
-            ->asJson()->acceptJson()->timeout(60);
+            ->asJson()->acceptJson()
+            ->timeout($timeout)
+            ->connectTimeout(10);
     }
 
-    public function call(string $method, array $parameters = []): array|bool
+    public function call(string $method, array $parameters = [], int $timeout = 60): array|bool
     {
-        $response = $this->request($method)->post('/' . $method, $parameters);
-        if (!$response->successful() || !$response->json('ok')) {
-            throw new RuntimeException("Telegram {$method} gagal: " . $response->body());
-        }
-        $result = $response->json('result', []);
-        if (! is_array($result) && ! is_bool($result)) {
-            throw new RuntimeException("Telegram {$method} mengembalikan result dengan tipe tidak valid.");
+        $attempts = 3;
+
+        for ($i = 1; $i <= $attempts; $i++) {
+            try {
+                $response = $this->request($method, $timeout)->post('/' . $method, $parameters);
+            } catch (ConnectionException $e) {
+                if ($i === $attempts) {
+                    throw new RuntimeException("Telegram {$method} gagal (koneksi): " . $e->getMessage(), 0, $e);
+                }
+                usleep(500_000 * $i);
+                continue;
+            }
+
+            if ($response->serverError() || $response->status() === 429) {
+                if ($i < $attempts) {
+                    $wait = $response->status() === 429
+                        ? (int) $response->json('parameters.retry_after', 1)
+                        : $i;
+                    sleep(max(1, $wait));
+                    continue;
+                }
+            }
+
+            if (!$response->successful() || !$response->json('ok')) {
+                throw new RuntimeException("Telegram {$method} gagal: " . $response->body());
+            }
+
+            $result = $response->json('result', []);
+            if (!is_array($result) && !is_bool($result)) {
+                throw new RuntimeException("Telegram {$method} mengembalikan result dengan tipe tidak valid.");
+            }
+
+            return $result;
         }
 
-        return $result;
+        throw new RuntimeException("Telegram {$method} gagal setelah {$attempts} percobaan.");
     }
+
+
 
     public function sendMessage(string|int $chatId, string $text, ?array $keyboard = null): array
     {
@@ -68,13 +98,20 @@ class TelegramClient
         $this->call('editMessageReplyMarkup', ['chat_id' => $chatId, 'message_id' => $messageId, 'reply_markup' => $markup]);
     }
 
-    public function getUpdates(int $offset = 0): array
-    {
-        $result = $this->call('getUpdates', ['offset' => $offset, 'timeout' => config('janeta.telegram.polling_timeout', 30), 'allowed_updates' => ['message', 'callback_query']]);
-        if (! is_array($result)) {
-            throw new RuntimeException('Telegram getUpdates mengembalikan result bukan array.');
-        }
+public function getUpdates(int $offset = 0): array
+{
+    $poll = (int) config('janeta.telegram.polling_timeout', 30);
 
-        return $result;
+    $result = $this->call('getUpdates', [
+        'offset' => $offset,
+        'timeout' => $poll,
+        'allowed_updates' => ['message', 'callback_query'],
+    ], $poll + 15); 
+
+    if (!is_array($result)) {
+        throw new RuntimeException('Telegram getUpdates mengembalikan result bukan array.');
     }
+
+    return $result;
+}
 }
