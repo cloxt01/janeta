@@ -397,11 +397,11 @@ class OltService
         return null;
     }
 
-    private function parse(array $match, string $raw, string $olt): array
+    private function parse(array $match, string $raw, string $olt, ?string $id = null): array
     {
         [$all, $fsp, $ontId, $sn, $state] = $match;
         [$frame, $slot, $port] = explode('/', preg_replace('/\s+/', '', $fsp));
-        $description = preg_match('/Description\s*:\s*([^\r\n]+)/i', $raw, $d) ? trim($d[1]) : '-';
+        $description = $this->extractDescription($raw, $id);
         [$customerId, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
         return compact('olt', 'frame', 'slot', 'port', 'ontId', 'sn', 'state', 'customerId', 'customerName');
     }
@@ -410,9 +410,9 @@ class OltService
     {
         $found = $this->search("display ont info by-desc {$id}");
         if (!$found || !preg_match('/(\d+\s*\/\s*\d+\s*\/\s*\d+)\s+(\d+)\s+([A-Z0-9]{16})\s+\w+\s+(\w+)/i', $found[1], $m)) return null;
-        $data = $this->parse($m, $found[1], $found[0]);
+        $data = $this->parse($m, $found[1], $found[0], $id);
         $data['descriptionTarget'] = $id;
-        $data['customerName'] = $data['customerName'] === '-' ? '-' : $data['customerName'];
+        $data['customerName'] = trim($data['customerName']);
         $result = $this->details($data);
         $this->close($found[0]);
         return $result;
@@ -464,6 +464,22 @@ class OltService
         $data = $this->byDescription($id);
         return $data ? ['descriptionTarget' => $id, 'customerName' => $data['customerName'], 'sn' => $data['sn'], 'frame' => $data['frame'], 'slot' => $data['slot'], 'port' => $data['port'], 'ontID' => $data['ontId']] : null;
     }
+    private function extractDescription(string $raw, ?string $id = null): string
+    {
+        if (preg_match('/Description\s*:\s*([^\r\n]+)/i', $raw, $m)) {
+            return trim($m[1]);
+        }
+
+        if ($id !== null && preg_match('/' . preg_quote($id, '/') . '[ \t]*-[ \t]*([^\r\n]+)/i', $raw, $m)) {
+            return trim($id) . '-' . trim($m[1]);
+        }
+
+        if (preg_match('/^\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s+\d+\s+(\S+-[^\r\n]+)$/m', $raw, $m)) {
+            return trim($m[1]);
+        }
+
+        return '-';
+    }
 
     public function apiVersion(string $id): ?array
     {
@@ -487,6 +503,11 @@ class OltService
         if (preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $stateMatch)) {
             $state = $stateMatch[1];
         }
+
+        $description = $this->extractDescription($found[1], $id);
+        [, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
+        $customerName = trim($customerName) ?: '-';
+
         $raw = $this->command($found[0], "display ont version {$frame} {$slot} {$port} {$m[2]}") ?? '';
         $details = $this->details([
             'olt' => $found[0],
@@ -497,11 +518,22 @@ class OltService
             'sn' => $m[3],
             'state' => $state,
             'customerId' => $id,
-            'customerName' => '-',
+            'customerName' => $customerName,
             'descriptionTarget' => $id,
         ]);
         $equipment = preg_match('/Equipment-ID\s*:\s*([^\r\n]+)/i', $raw, $e) ? trim($e[1]) : '-';
-        $result = array_merge($details, ['idcust' => $id, 'sn' => $m[3], 'frame' => $frame, 'slot' => $slot, 'port' => $port, 'ontId' => $m[2], 'brand' => 'Unknown', 'type' => $equipment, 'wlanType' => 'Unknown']);
+        $result = array_merge($details, [
+            'idcust' => $id,
+            'customerName' => $customerName,
+            'sn' => $m[3],
+            'frame' => $frame,
+            'slot' => $slot,
+            'port' => $port,
+            'ontId' => $m[2],
+            'brand' => 'Unknown',
+            'type' => $equipment,
+            'wlanType' => 'Unknown',
+        ]);
         $this->close($found[0]);
         return $result;
     }
