@@ -28,7 +28,24 @@ class OntController extends Controller
         $this->audit($request, 'api.ont_version_lookup', 'API pencarian versi ONT dijalankan untuk ID '.$id.'.');
         $data = $this->olt->apiVersion($id);
         if (!$data) return response()->json(['status' => 404, 'message' => "Data versi ONT pada ID Customer {$id} tidak ditemukan di OLT."], 404);
-        return response()->json(['status' => 200, 'message' => 'Data spesifikasi ONT berhasil ditarik', 'data' => ['location' => ['id_customer' => $data['idcust'], 'frame' => $data['frame'], 'slot' => $data['slot'], 'port' => $data['port'], 'ont_id' => $data['ontId']], 'specification' => ['serial_number' => $data['sn'], 'brand' => $data['brand'], 'type' => $data['type'], 'wlan_band' => $data['wlanType']]]]);
+
+        $available = $data['versionAvailable'] ?? true;
+
+        return response()->json([
+            'status' => 200,
+            'message' => $available
+                ? 'Data spesifikasi ONT berhasil ditarik'
+                : 'ONT ditemukan, tetapi data spesifikasi tidak dapat dibaca. '.$data['versionReason'],
+            'data' => [
+                'location' => ['id_customer' => $data['idcust'], 'frame' => $data['frame'], 'slot' => $data['slot'], 'port' => $data['port'], 'ont_id' => $data['ontId']],
+                'ont' => [
+                    'run_state' => $data['runState'],
+                    'version_available' => $available,
+                    'reason' => $data['versionReason'] ?? null,
+                ],
+                'specification' => ['serial_number' => $data['sn'], 'brand' => $data['brand'], 'type' => $data['type'], 'wlan_band' => $data['wlanType']],
+            ],
+        ]);
     }
 
     private function audit(Request $request, string $action, string $description): void

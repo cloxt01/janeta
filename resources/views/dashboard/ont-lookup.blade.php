@@ -2,6 +2,9 @@
 <div class="mb-6"><p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-500">Operasional</p><h1 class="text-3xl font-bold">Cari Detail ONT</h1><p class="mt-1 text-slate-400">Tarik status, lokasi, serial number, dan informasi jaringan dari OLT.</p></div>
 <form method="get" action="{{ route('ont.lookup') }}" class="mb-6 flex max-w-2xl gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><input name="id" value="{{ $id }}" placeholder="Masukkan ID customer" required class="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400"><button class="jn-button">Cari</button>@if($result)<button name="wifi" value="1" class="jn-button jn-button-secondary">Cek Wi‑Fi</button>@endif</form>
 @if($error)<div class="mb-5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700">{{ $error }}</div>@endif
+@if($result && ($result['versionAvailable'] ?? true) === false)
+<div class="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-700">Data spesifikasi tidak tersedia. {{ $result['versionReason'] }}</div>
+@endif
 @if($result)<div class="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
     @foreach([['runState', 'Status ONT'], ['rxPower', 'RX Power'], ['txPower', 'TX Power'], ['oltRxPower', 'OLT RX Power'], ['temp', 'Suhu'], ['voltage', 'Voltage'], ['wanIp', 'WAN IP'], ['wanStatus', 'WAN Status']] as [$key, $label])
     <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><p class="text-xs uppercase tracking-wide text-slate-500">{{ $label }}</p><p class="mt-2 text-lg font-bold {{ $key === 'runState' && strtolower($result[$key] ?? '') === 'online' ? 'text-emerald-600' : 'text-slate-800' }}">{{ $result[$key] ?? '-' }}{{ in_array($key, ['rxPower', 'txPower', 'oltRxPower']) && ($result[$key] ?? '-') !== '-' ? ' dBm' : '' }}</p></div>

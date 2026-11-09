@@ -161,8 +161,20 @@ class JanetaBotService
 
     private function format(array $d): string
     {
-        $rx = $d['rxPower']; $signal = $rx !== '-80.00' ? ((float) $rx < -29 || (float) $rx > -15 ? ' _(Sinyal Lemah)_' : ' *(Normal)*') : ' *(LOS)*';
-        return "=== *HASIL PENGECEKAN ONT JANGKAUNET* ===\n\n__*[ DATA PELANGGAN ]*__\n• ID Customer: `{$d['descriptionTarget']}`\n• Nama Pelanggan: _{$d['customerName']}_\n• Frame/Slot/Port:ID: `{$d['frame']}/{$d['slot']}/{$d['port']}:{$d['ontId']}`\n• Serial Number: `{$d['sn']}`\n\n__*[ INFORMASI OPTIK / FISIK ]*__\n• RX Power (ONT): *{$rx} dBm*{$signal}\n• TX Power (ONT): *{$d['txPower']} dBm*\n• OLT Rx ONT Power: *{$d['oltRxPower']} dBm*\n• Temperature: _{$d['temp']} C_\n• Voltage: _{$d['voltage']} V_\n• Status ONT: `" . strtoupper($d['runState']) . "`\n\n__*[ STATUS WAN INTERNET ]*__\n• Connection Type: `{$d['wanConnType']}`\n• IPv4 Conn Status: *{$d['wanStatus']}*\n• IPv4 Access Type: _{$d['wanAccessType']}_\n• IPv4 Address: `{$d['wanIp']}`\n• Subnet Mask: `{$d['wanSubnet']}`\n• Default Gateway: `{$d['wanGateway']}`\n• Primary DNS: `{$d['wanDns1']}`\n• Secondary DNS: `{$d['wanDns2']}`";
+        $online = strtolower($d['runState']) === 'online';
+
+        $customer = "=== *HASIL PENGECEKAN ONT JANGKAUNET* ===\n\n__*[ DATA PELANGGAN ]*__\n• ID Customer: `{$d['descriptionTarget']}`\n• Nama Pelanggan: _{$d['customerName']}_\n• Frame/Slot/Port:ID: `{$d['frame']}/{$d['slot']}/{$d['port']}:{$d['ontId']}`\n• Serial Number: `{$d['sn']}`\n";
+
+        if (!$online) {
+            return $customer
+                . "• Status ONT: `" . strtoupper($d['runState']) . "`\n\n"
+                . "⚠️ *Keterangan:* " . $this->olt->ontOfflineReason($d['runState']) . "\n";
+        }
+
+        $rx = $d['rxPower'];
+        $signal = $rx !== '-80.00' ? ((float) $rx < -29 || (float) $rx > -15 ? ' _(Sinyal Lemah)_' : ' *(Normal)*') : ' *(LOS)*';
+
+        return $customer . "\n__*[ INFORMASI OPTIK / FISIK ]*__\n• RX Power (ONT): *{$rx} dBm*{$signal}\n• TX Power (ONT): *{$d['txPower']} dBm*\n• OLT Rx ONT Power: *{$d['oltRxPower']} dBm*\n• Temperature: _{$d['temp']} C_\n• Voltage: _{$d['voltage']} V_\n• Status ONT: `" . strtoupper($d['runState']) . "`\n\n__*[ STATUS WAN INTERNET ]*__\n• Connection Type: `{$d['wanConnType']}`\n• IPv4 Conn Status: *{$d['wanStatus']}*\n• IPv4 Access Type: _{$d['wanAccessType']}_\n• IPv4 Address: `{$d['wanIp']}`\n• Subnet Mask: `{$d['wanSubnet']}`\n• Default Gateway: `{$d['wanGateway']}`\n• Primary DNS: `{$d['wanDns1']}`\n• Secondary DNS: `{$d['wanDns2']}`";
     }
 
     private function findPort(string $chatId, string $args): void

@@ -518,6 +518,27 @@ class OltService
             $this->close($olt);
         }
     }
+    public function ontOfflineReason(string $state): string
+    {
+        return match (strtolower($state)) {
+            'los' => 'ONT LOS: tidak ada sinyal optik (fiber putus/bermasalah atau ONT tidak terhubung).',
+            'dying-gasp', 'dyinggasp' => 'ONT mati mendadak (dying gasp): kehilangan daya listrik.',
+            'offline' => 'ONT offline: perangkat tidak terhubung ke OLT.',
+            default => "ONT tidak online (state: {$state}).",
+        };
+    }
+
+    private function versionFailureReason(string $message, string $state): string
+    {
+        if (stripos($message, 'not online') !== false) {
+            return strtolower($state) === 'online'
+                ? "ONT tidak online saat data versi dibaca (state terakhir: {$state})."
+                : $this->ontOfflineReason($state);
+        }
+
+        return 'OLT menolak command version: ' . $message;
+    }
+
     public function apiVersion(string $id): ?array
     {
         $id = trim($id);
@@ -545,7 +566,19 @@ class OltService
         [, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
         $customerName = trim($customerName) ?: '-';
 
-        $raw = $this->command($found[0], "display ont version {$frame} {$slot} {$port} {$m[2]}") ?? '';
+        $stateLower = strtolower($state);
+        $raw = '';
+        $versionReason = null;
+
+        if ($stateLower === 'online') {
+            $raw = $this->command($found[0], "display ont version {$frame} {$slot} {$port} {$m[2]}") ?? '';
+            if (preg_match('/Failure\s*:\s*([^\r\n]+)/i', $raw, $failure)) {
+                $versionReason = $this->versionFailureReason(trim($failure[1]), $state);
+            }
+        } else {
+            $versionReason = $this->ontOfflineReason($state);
+        }
+
         $details = $this->details([
             'olt' => $found[0],
             'frame' => $frame,
@@ -558,7 +591,11 @@ class OltService
             'customerName' => $customerName,
             'descriptionTarget' => $id,
         ]);
-        $equipment = preg_match('/Equipment-ID\s*:\s*([^\r\n]+)/i', $raw, $e) ? trim($e[1]) : '-';
+
+        $equipment = ($versionReason === null && preg_match('/Equipment-ID\s*:\s*([^\r\n]+)/i', $raw, $e))
+            ? trim($e[1])
+            : '-';
+
         $result = array_merge($details, [
             'idcust' => $id,
             'customerName' => $customerName,
@@ -570,10 +607,13 @@ class OltService
             'brand' => 'Unknown',
             'type' => $equipment,
             'wlanType' => 'Unknown',
+            'versionAvailable' => $versionReason === null,
+            'versionReason' => $versionReason,
         ]);
         $this->close($found[0]);
         return $result;
     }
+
 
     public function findPort(string $olt, string $frame, string $slot, string $port): ?array
     {
