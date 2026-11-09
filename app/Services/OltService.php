@@ -116,34 +116,69 @@ class OltService
     private function command(string $oltName, string $command): ?string
     {
         $startedAt = microtime(true);
+
         $this->debug('ssh.command.started', [
             'olt' => $oltName,
             'command' => $command,
         ]);
-        $olt = $this->activeOlt($oltName);
-        if (!$olt) {
-            $this->debug('ssh.command.skipped', ['olt' => $oltName, 'reason' => 'OLT tidak aktif atau tidak ditemukan.']);
-            return null;
+
+        try {
+            $olt = $this->activeOlt($oltName);
+
+            if (!$olt) {
+                $this->debug('ssh.command.skipped', [
+                    'olt' => $oltName,
+                    'reason' => 'OLT tidak aktif atau tidak ditemukan.',
+                ]);
+
+                return null;
+            }
+
+            $ssh = $this->session($olt);
+
+            if (!$ssh) {
+                throw new \RuntimeException('SSH session unavailable.');
+            }
+
+            $ssh->write($command . "\n");
+
+            $output = $ssh->read('#');
+
+            if (
+                str_contains($output, '{ <cr>||<K> }') ||
+                str_contains($output, '<cr>')
+            ) {
+                $ssh->write("\n");
+                $output .= $ssh->read('#');
+            }
+
+            while (str_contains($output, '---- More')) {
+                $ssh->write(" ");
+                $output .= $ssh->read('#');
+            }
+
+            $this->debug('ssh.command.completed', [
+                'olt' => $oltName,
+                'command' => $command,
+                'duration_ms' => round(
+                    (microtime(true) - $startedAt) * 1000,
+                    2
+                ),
+                'output_length' => strlen($output),
+                'output' => $output,
+            ]);
+
+            return $output ?: null;
+
+        } catch (\Throwable $e) {
+            $this->debug('ssh.command.failed', [
+                'olt' => $oltName,
+                'command' => $command,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
         }
-        $ssh = $this->session($olt);
-        $ssh->write($command . "\n");
-        $output = $ssh->read('#');
-        if (str_contains($output, '{ <cr>||<K> }') || str_contains($output, '<cr>')) {
-            $ssh->write("\n");
-            $output .= $ssh->read('#');
-        }
-        while (str_contains($output, '---- More')) {
-            $ssh->write(" ");
-            $output .= $ssh->read('#');
-        }
-        $this->debug('ssh.command.completed', [
-            'olt' => $oltName,
-            'command' => $command,
-            'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
-            'output_length' => strlen($output),
-            'output' => $output,
-        ]);
-        return $output ?: null;
     }
 
     private function session(Olt $olt): SSH2
