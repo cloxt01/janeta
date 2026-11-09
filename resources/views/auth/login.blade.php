@@ -6,43 +6,44 @@
     <title>Masuk · Janeta</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <style>
-        .login-page { background: #fff; color: #141414; }
-        .login-card { width: min(100%, 360px); }
-        .login-input { border: 1px solid #cbd5e1; background: #f8fafc; color: #0f172a; }
-        .login-input:focus { border-color: #0f172a; box-shadow: 0 0 0 3px rgb(15 23 42 / 10%); outline: 0; }
-        .login-button { background: #0f172a; }
-        .login-button:hover { background: #1e293b; }
+        .login-page { background: #08090C; color: #f8fafc; }
+        .login-card { width: min(100%, 320px); }
+        .login-input { border: 1px solid #334155; background: #0f172a; color: #f8fafc; }
+        .login-input:focus { border-color: #38bdf8; box-shadow: 0 0 0 3px rgb(56 189 248 / 25%); outline: 0; }
+        .login-button { background: #f8fafc; color: #0f172a; }
+        .login-button:hover { background: #e2e8f0; }
     </style>
 </head>
 <body class="login-page min-h-screen">
-    <main class="mx-auto flex min-h-screen w-full max-w-[430px] items-center px-6 py-8">
-        <div class="login-card">
-            <center>
-                <div class="login-logo mb-10" aria-label="JANETA">JANETA</div>
-                <h1 class="mb-6 text-[19px] font-normal tracking-tight text-slate-900">Masuk untuk melanjutkan.</h1>
-            
-            </center>
-
+    <main class="mx-auto flex min-h-screen w-full max-w-[400px] items-center px-6 py-8">
+        <div class="login-card mx-auto">
+            <div style="margin-bottom: 20px;">
+                <img
+                    src="{{ asset('images/jangkaunet-logo.png') }}"
+                    alt="JANETA Logo"
+                    style="width: 140px; max-width: 100%; height: auto; display: block; margin-left: auto; margin-right: auto;"
+                >
+            </div>
 
             @if($errors->any())
-                <div class="mb-5 rounded border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ $errors->first() }}</div>
+                <div class="mb-4 rounded border border-rose-900/50 bg-rose-950/40 px-3 py-2.5 text-xs text-rose-300">{{ $errors->first() }}</div>
             @endif
 
-            <form method="post" action="{{ route('login.authenticate') }}" class="space-y-5">
+            <form method="post" action="{{ route('login.authenticate') }}" class="space-y-4">
                 @csrf
                 <div>
                     <label for="email" class="sr-only">Email</label>
-                    <input id="email" name="email" type="email" value="{{ old('email') }}" placeholder="Email" required autofocus autocomplete="username" class="login-input h-[58px] w-full rounded-none px-5 text-[16px] placeholder:text-slate-700">
+                    <input id="email" name="email" type="email" value="{{ old('email') }}" placeholder="Email" required autofocus autocomplete="username" class="login-input h-[46px] w-full rounded-lg px-4 text-sm placeholder:text-slate-400">
                 </div>
                 <div>
                     <label for="password" class="sr-only">Password</label>
-                    <input id="password" name="password" type="password" placeholder="Password" required autocomplete="current-password" class="login-input h-[58px] w-full rounded-none px-5 text-[16px] placeholder:text-slate-700">
+                    <input id="password" name="password" type="password" placeholder="Password" required autocomplete="current-password" class="login-input h-[46px] w-full rounded-lg px-4 text-sm placeholder:text-slate-400">
                 </div>
-                <label class="flex cursor-pointer items-center gap-2 text-[15px] text-slate-900">
-                    <input type="checkbox" id="show-password" class="h-4 w-4 accent-slate-900">
+                <label class="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+                    <input type="checkbox" id="show-password" class="h-3.5 w-3.5 accent-slate-100 rounded">
                     Tampilkan Password
                 </label>
-                <button type="submit" class="login-button h-[58px] w-full rounded-xl text-[16px] font-medium text-white transition">MASUK</button>
+                <button type="submit" class="cursor-pointer login-button h-[46px] w-full rounded-lg text-sm font-semibold transition">MASUK</button>
             </form>
         </div>
     </main>

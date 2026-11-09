@@ -1224,23 +1224,138 @@ class OltService
         return preg_match($pattern, $raw, $m) ? trim($m[1]) : $default;
     }
 
-    public function restart(string $olt, string $frame, string $slot, string $port, string $ontId): ?string
-    {
-        $this->debug('ssh.ont_restart.started', compact('olt', 'frame', 'slot', 'port', 'ontId'));
-        $this->command($olt, "interface gpon {$frame}/{$slot}");
-        $result = $this->command($olt, "ont reset {$port} {$ontId}");
-        $this->close($olt);
-        $this->debug('ssh.ont_restart.completed', [
-            'olt' => $olt,
-            'frame' => $frame,
-            'slot' => $slot,
-            'port' => $port,
-            'ont_id' => $ontId,
-            'output_length' => strlen((string) $result),
-            'response' => $result,
-        ]);
-        return $result;
+
+
+    public function restart(
+        string $olt,
+        string $frame,
+        string $slot,
+        string $port,
+        string $ontId
+    ): ?string {
+        $this->debug('ssh.ont_restart.started', compact(
+            'olt', 'frame', 'slot', 'port', 'ontId'
+        ));
+
+        try {
+            // 1. Pastikan OLT aktif
+            $record = $this->activeOlt($olt);
+
+            if (!$record) {
+                throw new \RuntimeException(
+                    "OLT {$olt} tidak aktif atau tidak ditemukan."
+                );
+            }
+
+            // 2. Masuk configuration mode
+            $config = $this->command($olt, 'config') ?? '';
+
+            if (preg_match(
+                '/Failure|Error|Unknown command/i',
+                $config
+            )) {
+                throw new \RuntimeException(
+                    'Gagal masuk configuration mode: ' . trim($config)
+                );
+            }
+
+            // 3. Masuk interface GPON
+            $interfaceCommand = "interface gpon {$frame}/{$slot}";
+            $interface = $this->command($olt, $interfaceCommand) ?? '';
+
+            if (preg_match(
+                '/Failure|Error|Unknown command|Parameter error/i',
+                $interface
+            )) {
+                throw new \RuntimeException(
+                    'Gagal masuk interface GPON: ' . trim($interface)
+                );
+            }
+
+            // 4. Ambil SSH session yang sama
+            $ssh = $this->session($record);
+            $ssh->setTimeout(10);
+
+            // 5. Kirim perintah reset
+            $resetCommand = "ont reset {$port} {$ontId}";
+
+            $this->debug('ssh.ont_restart.command', [
+                'olt' => $olt,
+                'command' => $resetCommand,
+            ]);
+
+            $ssh->write($resetCommand . "\n");
+
+            // 6. Tunggu konfirmasi Huawei: (y/n)[n]:
+            $confirmation = $ssh->read(
+                '/\(y\/n\)\[n\]:\s*$/i',
+                SSH2::READ_REGEX
+            );
+
+            if (
+                $confirmation === false ||
+                !preg_match('/\(y\/n\)\[n\]:/i', $confirmation)
+            ) {
+                throw new \RuntimeException(
+                    'OLT tidak memberikan konfirmasi reset. Reset dibatalkan. Output: '
+                    . (string) $confirmation
+                );
+            }
+
+            $this->debug('ssh.ont_restart.confirmation_received', [
+                'olt' => $olt,
+                'response' => $confirmation,
+            ]);
+
+            // 7. Jawab Y untuk menyetujui reset
+            $ssh->write("y\n");
+
+            // 8. Tunggu respons dan prompt OLT kembali
+            $result = $ssh->read('#');
+
+            $result = (string) $confirmation . (string) $result;
+
+            // 9. Periksa apakah OLT menolak perintah
+            if (preg_match(
+                '/Failure|Error|Parameter error|Unknown command/i',
+                $result
+            )) {
+                throw new \RuntimeException(
+                    'OLT menolak reset ONT: ' . trim($result)
+                );
+            }
+
+            $this->debug('ssh.ont_restart.completed', [
+                'olt' => $olt,
+                'frame' => $frame,
+                'slot' => $slot,
+                'port' => $port,
+                'ont_id' => $ontId,
+                'success' => true,
+                'confirmed' => true,
+                'response' => $result,
+            ]);
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            $this->debug('ssh.ont_restart.failed', [
+                'olt' => $olt,
+                'frame' => $frame,
+                'slot' => $slot,
+                'port' => $port,
+                'ont_id' => $ontId,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+
+        } finally {
+            $this->close($olt);
+        }
     }
+
+
 
     public function scanActiveAlarms(): array
     {
