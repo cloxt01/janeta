@@ -13,6 +13,7 @@ class JanetaCollectSnmpCommand extends Command
 
     public function handle(OltService $olt): int
     {
+
         $count = 0;
         foreach (Olt::where('is_active', true)->where(function ($query) {
             $query->where('snmp_enabled', true)->orWhere('connection_type', 'snmp');

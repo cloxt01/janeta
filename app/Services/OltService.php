@@ -408,8 +408,15 @@ class OltService
 
     public function byDescription(string $id): ?array
     {
-        $found = $this->search("display ont info by-desc {$id}");
-        if (!$found || !preg_match('/(\d+\s*\/\s*\d+\s*\/\s*\d+)\s+(\d+)\s+([A-Z0-9]{16})\s+\w+\s+(\w+)/i', $found[1], $m)) return null;
+        $id = trim($id);
+        // Coba cari tanpa kutip, lalu fallback dengan kutip ganda jika mengandung spasi/karakter khusus
+        $found = $this->search("display ont info by-desc {$id}")
+            ?? $this->search('display ont info by-desc "' . $id . '"');
+
+        if (!$found || !preg_match('/(\d+\s*\/\s*\d+\s*\/\s*\d+)\s+(\d+)\s+([A-Z0-9]{16})\s+\w+\s+(\w+)/i', $found[1], $m)) {
+            return null;
+        }
+
         $data = $this->parse($m, $found[1], $found[0], $id);
         $data['descriptionTarget'] = $id;
         $data['customerName'] = trim($data['customerName']);
