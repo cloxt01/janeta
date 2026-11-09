@@ -54,7 +54,7 @@ class OltService
             'olt' => $olt->name,
             'frame' => $frame,
         ]);
-        if ($olt->connection_type !== 'snmp') {
+        if (! $olt->snmp_enabled && $olt->connection_type !== 'snmp') {
             throw new \RuntimeException("OLT {$olt->name} bukan koneksi SNMP.");
         }
 
