@@ -42,6 +42,8 @@ class OntController extends Controller
                     'run_state' => $data['runState'],
                     'version_available' => $available,
                     'reason' => $data['versionReason'] ?? null,
+                    'last_up_time' => $data['lastUpTime'] ?? null,
+                    'last_down_cause' => $data['lastDownCause'] ?? null,
                 ],
                 'specification' => ['serial_number' => $data['sn'], 'brand' => $data['brand'], 'type' => $data['type'], 'wlan_band' => $data['wlanType']],
             ],

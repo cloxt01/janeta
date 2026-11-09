@@ -167,33 +167,44 @@ class JanetaBotService
 
         if (!$online) {
             return $customer
-                . "• Status ONT: `" . strtoupper($d['runState']) . "`\n\n"
+                . "• Status ONT: `" . strtoupper($d['runState']) . "`\n"
+                . "• Last Down Cause: `" . ($d['lastDownCause'] ?? '-') . "`\n"
+                . "• Last Up Time: `{$d['lastUpTime']}`\n\n"
                 . "⚠️ *Keterangan:* " . $this->olt->ontOfflineReason($d['runState']) . "\n";
         }
 
         $rx = $d['rxPower'];
         $signal = $rx !== '-80.00' ? ((float) $rx < -29 || (float) $rx > -15 ? ' _(Sinyal Lemah)_' : ' *(Normal)*') : ' *(LOS)*';
 
-        return $customer . "\n__*[ INFORMASI OPTIK / FISIK ]*__\n• RX Power (ONT): *{$rx} dBm*{$signal}\n• TX Power (ONT): *{$d['txPower']} dBm*\n• OLT Rx ONT Power: *{$d['oltRxPower']} dBm*\n• Temperature: _{$d['temp']} C_\n• Voltage: _{$d['voltage']} V_\n• Status ONT: `" . strtoupper($d['runState']) . "`\n\n__*[ STATUS WAN INTERNET ]*__\n• Connection Type: `{$d['wanConnType']}`\n• IPv4 Conn Status: *{$d['wanStatus']}*\n• IPv4 Access Type: _{$d['wanAccessType']}_\n• IPv4 Address: `{$d['wanIp']}`\n• Subnet Mask: `{$d['wanSubnet']}`\n• Default Gateway: `{$d['wanGateway']}`\n• Primary DNS: `{$d['wanDns1']}`\n• Secondary DNS: `{$d['wanDns2']}`";
+        return $customer . "\n__*[ INFORMASI OPTIK / FISIK ]*__\n• RX Power (ONT): *{$rx} dBm*{$signal}\n• TX Power (ONT): *{$d['txPower']} dBm*\n• OLT Rx ONT Power: *{$d['oltRxPower']} dBm*\n• Temperature: _{$d['temp']} C_\n• Voltage: _{$d['voltage']} V_\n• Status ONT: `" . strtoupper($d['runState']) . "`\n• Last Up Time: `{$d['lastUpTime']}`\n\n__*[ STATUS WAN INTERNET ]*__\n• Connection Type: `{$d['wanConnType']}`\n• IPv4 Conn Status: *{$d['wanStatus']}*\n• IPv4 Access Type: _{$d['wanAccessType']}_\n• IPv4 Address: `{$d['wanIp']}`\n• Subnet Mask: `{$d['wanSubnet']}`\n• Default Gateway: `{$d['wanGateway']}`\n• Primary DNS: `{$d['wanDns1']}`\n• Secondary DNS: `{$d['wanDns2']}`";
     }
 
-    private function findPort(string $chatId, string $args): void
+        private function findPort(string $chatId, string $args): void
     {
         [$olt, $fsp] = array_pad(preg_split('/\s+/', trim($args)), 2, '');
         [$f, $s, $p] = array_pad(explode('/', $fsp), 3, '');
-        if (!$olt || !$f || !$s || !$p) { $this->send($chatId, '⚠️ Format salah. Contoh penggunaan: `/findport DUTA 0/5/13`'); return; }
+        if ($olt === '' || !ctype_digit($f) || !ctype_digit($s) || !ctype_digit($p)) {
+            $this->send($chatId, '⚠️ Format salah. Contoh penggunaan: `/findport DUTA 0/5/13`');
+            return;
+        }
         $d = $this->olt->findPort(strtoupper($olt), $f, $s, $p);
         if (!$d) { $this->send($chatId, '❌ Gagal menarik data port OLT.'); return; }
         $this->send($chatId, "*LAPORAN STATUS PORT GLOBAL*\n\n• *Nama OLT:* OLT-{$d['olt']}\n• *Koordinat Port:* `{$f}/{$s}/{$p}`\n• *Total ONT Terpasang:* {$d['totalOnt']} unit\n\n* ONLINE:* {$d['online']} Perangkat\n* OFFLINE:* {$d['offline']} Perangkat\n* LOS:* {$d['los']} Perangkat\n* DYING GASP:* {$d['dyingGasp']} Perangkat");
+        
+    
     }
 
     private function findPortOnt(string $chatId, string $args): void
     {
         [$fsp, $id] = array_pad(preg_split('/\s+/', trim($args)), 2, '');
         [$f, $s, $p] = array_pad(explode('/', $fsp), 3, '');
-        if (!$fsp || !$id || !$f || !$s || !$p || !is_numeric($id)) { $this->send($chatId, '⚠️ Format salah. Contoh: `/findportont 0/5/13 5`'); return; }
+        if ($fsp === '' || !ctype_digit($f) || !ctype_digit($s) || !ctype_digit($p) || !ctype_digit($id)) {
+            $this->send($chatId, '⚠️ Format salah. Contoh: `/findportont 0/5/13 5`');
+            return;
+        }
         $this->report($chatId, $this->olt->findPortOnt($f, $s, $p, $id));
     }
+
 
     private function callback(array $callback): void
     {

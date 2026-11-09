@@ -444,6 +444,11 @@ class OltService
 
     private function details(array $data): array
     {
+        $info = $this->command($data['olt'], "display ont info {$data['frame']} {$data['slot']} {$data['port']} {$data['ontId']}") ?? '';
+        $infoValue = function (string $pattern, string $default = '-') use ($info): string {
+            return preg_match($pattern, $info, $m) ? trim($m[1]) : $default;
+        };
+
         $raw = '';
         if (strtolower($data['state']) === 'online') {
             $this->command($data['olt'], 'config');
@@ -463,7 +468,40 @@ class OltService
             'wanAccessType' => $value('/IPv4\s+access\s+type\s*:\s*([^\r\n]+)/i', '-'), 'wanIp' => $value('/IPv4\s+address\s*:\s*([.\d]+)/i', '-'),
             'wanSubnet' => $value('/Subnet\s+mask\s*:\s*([.\d]+)/i', '-'), 'wanGateway' => $value('/Default\s+gateway\s*:\s*([.\d]+)/i', '-'),
             'wanDns1' => $value('/Primary\s+DNS\s*:\s*([.\d]+)/i', '-'), 'wanDns2' => $value('/Secondary\s+DNS\s*:\s*([.\d]+)/i', '-'),
+            'lastDownCause' => strtolower($data['state']) === 'online'
+                ? null
+                : $infoValue('/Last\s+down\s+cause\s*:\s*([^\r\n]+)/i'),
+            'lastUpTime' => $this->normalizeDateTime($infoValue('/Last\s+up\s+time\s*:\s*([^\r\n]+)/i')),
         ]);
+    }
+
+    private function normalizeDateTime(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '-') {
+            return '-';
+        }
+
+        $formats = [
+            ['d-m-Y H:i:sP', true],
+            ['Y-m-d H:i:sP', true],
+            ['Y-m-d\TH:i:sP', true],
+            ['d-m-Y H:i:s', false],
+            ['Y-m-d H:i:s', false],
+        ];
+
+        foreach ($formats as [$format, $hasZone]) {
+            try {
+                $date = \Carbon\Carbon::createFromFormat($format, $value);
+                
+                // Ubah format output sesuai keinginan, contoh: 'd M Y, H:i:s' (08 Nov 2026, 20:56:12)
+                return $date->format('d-m-Y H:i:s'); 
+            } catch (\Throwable) {
+                // coba format berikutnya
+            }
+        }
+
+        return $value; 
     }
 
     public function apiByDescription(string $id): ?array
@@ -547,7 +585,7 @@ class OltService
         if (!$found || !preg_match('/(\d+\s*\/\s*\d+\s*\/\s*\d+)\s+(\d+)\s+([A-Z0-9]{12,20})\s+(\S+)\s+(\S+)/i', $found[1], $m)) {
             Log::warning('ONT lookup response did not match expected format', [
                 'olt' => $found[0] ?? null,
-                'customer_id' => $id,
+                'customer_id' => $id
             ]);
             $this->debug('ssh.ont_lookup.unparseable_response', [
                 'olt' => $found[0] ?? null,
