@@ -2,56 +2,156 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\OltService;
 use App\Models\AuditLog;
+use App\Models\OltServiceRequest;
+use App\Jobs\ProcessOltServices;
+use App\Events\OltServiceRequestUpdated;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class OntController extends Controller
 {
-    public function __construct(private OltService $olt) {}
-
     public function checkDescription(Request $request): JsonResponse
     {
-        $id = $request->query('id');
-        if (!$id) return response()->json(['status' => 400, 'message' => 'Parameter "id" (ID Customer) wajib disertakan.'], 400);
-        $this->audit($request, 'api.ont_description_lookup', 'API pencarian deskripsi ONT dijalankan untuk ID '.$id.'.');
-        $data = $this->olt->apiByDescription($id);
-        if (!$data) return response()->json(['status' => 404, 'message' => "Data ONT dengan ID '{$id}' tidak ditemukan di OLT."], 404);
-        return response()->json(['status' => 200, 'message' => 'Data ONT berhasil ditarik', 'data' => ['customer' => ['id' => $data['descriptionTarget'], 'name' => $data['customerName'], 'serial_number' => $data['sn'], 'frame' => $data['frame'], 'slot' => $data['slot'], 'port' => $data['port'], 'ontID' => $data['ontID']]]]);
+        $data = $request->validate([
+            'id' => ['required', 'string', 'max:100'],
+        ]);
+
+        $id = trim($data['id']);
+
+        if ($id === '') {
+            return response()->json([
+                'message' => 'Parameter ID wajib diisi.',
+            ], 422);
+        }
+
+        $this->audit(
+            $request,
+            'api.ont_description_lookup',
+            'Request pencarian ONT dimasukkan ke queue untuk ID '.$id.'.'
+        );
+
+        return $this->enqueue(
+            $request,
+            'ont.description',
+            ['id' => $id],
+            'Request pencarian ONT berhasil dimasukkan ke antrean.'
+        );
     }
 
     public function version(Request $request): JsonResponse
     {
-        $id = $request->query('id');
-        if (!$id) return response()->json(['status' => 400, 'message' => 'Parameter "id" wajib disertakan.'], 400);
-        $this->audit($request, 'api.ont_version_lookup', 'API pencarian versi ONT dijalankan untuk ID '.$id.'.');
-        $data = $this->olt->apiVersion($id);
-        if (!$data) return response()->json(['status' => 404, 'message' => "Data versi ONT pada ID Customer {$id} tidak ditemukan di OLT."], 404);
-
-        $available = $data['versionAvailable'] ?? true;
-
-        return response()->json([
-            'status' => 200,
-            'message' => $available
-                ? 'Data spesifikasi ONT berhasil ditarik'
-                : 'ONT ditemukan, tetapi data spesifikasi tidak dapat dibaca. '.$data['versionReason'],
-            'data' => [
-                'location' => ['id_customer' => $data['idcust'], 'frame' => $data['frame'], 'slot' => $data['slot'], 'port' => $data['port'], 'ont_id' => $data['ontId']],
-                'ont' => [
-                    'run_state' => $data['runState'],
-                    'version_available' => $available,
-                    'reason' => $data['versionReason'] ?? null,
-                    'last_up_time' => $data['lastUpTime'] ?? null,
-                    'last_down_cause' => $data['lastDownCause'] ?? null,
-                ],
-                'specification' => ['serial_number' => $data['sn'], 'brand' => $data['brand'], 'type' => $data['type'], 'wlan_band' => $data['wlanType']],
-            ],
+        $data = $request->validate([
+            'id' => ['required', 'string', 'max:100'],
         ]);
+
+        $id = trim($data['id']);
+
+        if ($id === '') {
+            return response()->json([
+                'message' => 'Parameter ID wajib diisi.',
+            ], 422);
+        }
+
+        $this->audit(
+            $request,
+            'api.ont_version_lookup',
+            'Request pencarian versi ONT dimasukkan ke queue untuk ID '.$id.'.'
+        );
+
+        return $this->enqueue(
+            $request,
+            'ont.version',
+            ['id' => $id],
+            'Request pencarian versi ONT berhasil dimasukkan ke antrean.'
+        );
     }
 
-    private function audit(Request $request, string $action, string $description): void
+    public function lookup(Request $request): JsonResponse
     {
+        $data = $request->validate([
+            'id' => ['required', 'string', 'max:100'],
+            'wifi' => ['nullable', 'boolean'],
+        ]);
+
+        $id = trim($data['id']);
+
+        if ($id === '') {
+            return response()->json([
+                'message' => 'ID customer wajib diisi.',
+            ], 422);
+        }
+
+        $wifi = $request->boolean('wifi');
+
+        $this->audit(
+            $request,
+            'ont.lookup',
+            'Pencarian ONT dimasukkan ke queue untuk ID '.$id.'.'
+        );
+
+        return $this->enqueue(
+            $request,
+            'ont.lookup',
+            [
+                'id' => $id,
+                'wifi' => $wifi,
+            ],
+            'Pencarian ONT berhasil dimasukkan ke antrean.'
+        );
+    }
+
+    /**
+     * Membuat request dan memasukkannya ke queue.
+     */
+    private function enqueue(
+        Request $request,
+        string $operation,
+        array $payload,
+        string $message
+    ): JsonResponse {
+        $task = OltServiceRequest::create([
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $request->user()?->id,
+            'operation' => $operation,
+            'status' => 'queued',
+            'payload' => $payload,
+        ]);
+
+        if ($task->user_id) {
+            event(new OltServiceRequestUpdated(
+                request_id: $task->uuid,
+                user_id: (int) $task->user_id,
+                operation: $task->operation,
+                status: 'queued',
+                message: $message,
+            ));
+        }
+
+        ProcessOltServices::dispatch($task->id)
+            ->onQueue('olt')
+            ->afterCommit();
+
+        return response()->json([
+            'status' => 202,
+            'message' => $message,
+            'data' => [
+                'request_id' => $task->uuid,
+                'operation' => $task->operation,
+                'status' => $task->status,
+            ],
+        ], 202);
+    }
+
+    /**
+     * Mencatat aktivitas API.
+     */
+    private function audit(
+        Request $request,
+        string $action,
+        string $description
+    ): void {
         AuditLog::create([
             'user_id' => $request->user()?->id,
             'action' => $action,

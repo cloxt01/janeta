@@ -63,33 +63,13 @@ class DashboardController extends Controller
         ]);
     }
 
-    public function ontLookup(Request $request): View
+    public function ontLookup(): View
     {
-        $id = $request->query('id');
-        $result = null;
-        $error = null;
-        if ($id) {
-            $request->validate(['id' => ['string', 'max:100']]);
-            $this->audit($request, $request->boolean('wifi') ? 'ont.wifi_lookup' : 'ont.lookup', 'Pencarian ONT dijalankan untuk ID '.$id.'.');
-            $result = app(OltService::class)->apiVersion($id);
-            if ($result && $request->boolean('wifi')) {
-                $result['wlan'] = app(OltService::class)->wlan(
-                    $result['olt'],
-                    $result['frame'],
-                    $result['slot'],
-                    $result['port'],
-                    $result['ontId'],
-                );
-            }
-            if (! $result) {
-                $activeOlts = Olt::where('is_active', true)->pluck('name')->implode(', ');
-                $error = $activeOlts
-                    ? "Data ONT dengan ID customer '{$id}' tidak ditemukan pada OLT aktif ({$activeOlts}). Pastikan OLT tempat ONT berada sudah diaktifkan."
-                    : 'Tidak ada OLT aktif untuk pencarian. Aktifkan minimal satu OLT terlebih dahulu.';
-            }
-        }
-
-        return view('dashboard.ont-lookup', compact('result', 'error', 'id'));
+        return view('dashboard.ont-lookup', [
+            'id' => null,
+            'result' => null,
+            'error' => null,
+        ]);
     }
 
     public function olts(): View
