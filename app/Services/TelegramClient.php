@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -33,6 +34,12 @@ class TelegramClient
                 if ($i === $attempts) {
                     throw new RuntimeException("Telegram {$method} gagal (koneksi): " . $e->getMessage(), 0, $e);
                 }
+
+                Log::warning("Telegram {$method} koneksi timeout/gagal (percobaan {$i}/{$attempts}), mencoba ulang...", [
+                    'error' => $e->getMessage()
+                ]);
+
+                // Perbaikan syntax usleep dengan perkalian waktu tunggu
                 usleep(500_000 * $i);
                 continue;
             }
@@ -42,6 +49,11 @@ class TelegramClient
                     $wait = $response->status() === 429
                         ? (int) $response->json('parameters.retry_after', 1)
                         : $i;
+                    
+                    Log::warning("Telegram {$method} merespons status {$response->status()}, menunggu {$wait} detik...", [
+                        'attempt' => $i
+                    ]);
+
                     sleep(max(1, $wait));
                     continue;
                 }
@@ -61,8 +73,6 @@ class TelegramClient
 
         throw new RuntimeException("Telegram {$method} gagal setelah {$attempts} percobaan.");
     }
-
-
 
     public function sendMessage(string|int $chatId, string $text, ?array $keyboard = null): array
     {
@@ -98,20 +108,20 @@ class TelegramClient
         $this->call('editMessageReplyMarkup', ['chat_id' => $chatId, 'message_id' => $messageId, 'reply_markup' => $markup]);
     }
 
-public function getUpdates(int $offset = 0): array
-{
-    $poll = (int) config('janeta.telegram.polling_timeout', 30);
+    public function getUpdates(int $offset = 0): array
+    {
+        $poll = (int) config('janeta.telegram.polling_timeout', 30);
 
-    $result = $this->call('getUpdates', [
-        'offset' => $offset,
-        'timeout' => $poll,
-        'allowed_updates' => ['message', 'callback_query'],
-    ], $poll + 15); 
+        $result = $this->call('getUpdates', [
+            'offset' => $offset,
+            'timeout' => $poll,
+            'allowed_updates' => ['message', 'callback_query'],
+        ], $poll + 15); 
 
-    if (!is_array($result)) {
-        throw new RuntimeException('Telegram getUpdates mengembalikan result bukan array.');
+        if (!is_array($result)) {
+            throw new RuntimeException('Telegram getUpdates mengembalikan result bukan array.');
+        }
+
+        return $result;
     }
-
-    return $result;
-}
 }

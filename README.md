@@ -85,12 +85,6 @@ https://domainmu.com
 
 Login menggunakan akun yang kamu set di seeder `database\seeders\DatabaseSeeder.php`: 
 
-default: 
-
-```
-admin@jangkaunet.com
-12345678
-```
 
 
 ## Dashboard
