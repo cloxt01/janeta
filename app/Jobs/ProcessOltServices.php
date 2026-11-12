@@ -3,10 +3,11 @@
 namespace App\Jobs;
 
 use App\Events\OltServiceRequestUpdated;
+use App\Events\OltActivityUpdated;
 use App\Models\Olt;
 use App\Models\OltServiceRequest;
 use App\Services\OltService;
-use App\Services\TelegramClient; // Pastikan TelegramClient di-inject atau dipanggil
+use App\Services\TelegramClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -41,6 +42,7 @@ class ProcessOltServices implements ShouldQueue
         ];
     }
 
+
     public function handle(OltService $service, TelegramClient $telegram): void
     {
         $task = OltServiceRequest::findOrFail($this->requestId);
@@ -49,29 +51,75 @@ class ProcessOltServices implements ShouldQueue
         $task->update([
             'status' => 'running',
             'started_at' => now(),
+            'finished_at' => null,
+            'duration_ms' => null,
             'error' => null,
         ]);
 
-        $this->broadcast($task, 'running', 'Proses OLT sedang dijalankan.');
+        $params = $task->payload ?? [];
+
+        $this->broadcastActivity(
+            $task->fresh(),
+            'running',
+            'Proses OLT sedang dijalankan.'
+        );
 
         try {
-            $params = $task->payload ?? [];
-
             $result = match ($task->operation) {
                 'ont.lookup' => $this->lookupOnt($service, $params),
                 'ont.description' => $service->apiByDescription($params['id']),
                 'ont.version' => $service->apiVersion($params['id']),
                 'ont.serial' => $service->bySerial($params['sn']),
-                'ont.find' => $service->findPortOnt($params['frame'], $params['slot'], $params['port'], $params['ont_id']),
-                'ont.restart' => $service->restart($params['olt'], $params['frame'], $params['slot'], $params['port'], $params['ont_id']),
-                'ont.activate' => $service->setOntState($params['olt'], $params['frame'], $params['slot'], $params['port'], $params['ont_id'], true),
-                'ont.deactivate' => $service->setOntState($params['olt'], $params['frame'], $params['slot'], $params['port'], $params['ont_id'], false),
-                'ont.wlan' => $service->wlan($params['olt'], $params['frame'], $params['slot'], $params['port'], $params['ont_id']),
-                'ont.port_scan' => $service->findPort($params['olt'], $params['frame'], $params['slot'], $params['port']),
-                default => throw new \InvalidArgumentException("Unknown OLT operation: {$task->operation}"),
+                'ont.find' => $service->findPortOnt(
+                    $params['frame'],
+                    $params['slot'],
+                    $params['port'],
+                    $params['ont_id']
+                ),
+                'ont.restart' => $service->restart(
+                    $params['olt'],
+                    $params['frame'],
+                    $params['slot'],
+                    $params['port'],
+                    $params['ont_id']
+                ),
+                'ont.activate' => $service->setOntState(
+                    $params['olt'],
+                    $params['frame'],
+                    $params['slot'],
+                    $params['port'],
+                    $params['ont_id'],
+                    true
+                ),
+                'ont.deactivate' => $service->setOntState(
+                    $params['olt'],
+                    $params['frame'],
+                    $params['slot'],
+                    $params['port'],
+                    $params['ont_id'],
+                    false
+                ),
+                'ont.wlan' => $service->wlan(
+                    $params['olt'],
+                    $params['frame'],
+                    $params['slot'],
+                    $params['port'],
+                    $params['ont_id']
+                ),
+                'ont.port_scan' => $service->findPort(
+                    $params['olt'],
+                    $params['frame'],
+                    $params['slot'],
+                    $params['port']
+                ),
+                default => throw new \InvalidArgumentException(
+                    "Unknown OLT operation: {$task->operation}"
+                ),
             };
 
-            $duration = (int) round((microtime(true) - $startedAt) * 1000);
+            $duration = (int) round(
+                (microtime(true) - $startedAt) * 1000
+            );
 
             $task->update([
                 'status' => 'completed',
@@ -80,27 +128,44 @@ class ProcessOltServices implements ShouldQueue
                 'finished_at' => now(),
             ]);
 
-            $this->broadcast($task->fresh(), 'completed', 'Proses OLT berhasil.', $result);
+            $task = $task->fresh();
 
+            $this->broadcast(
+                $task,
+                'completed',
+                'Proses OLT berhasil.',
+                $result
+            );
+
+            $this->broadcastActivity(
+                $task,
+                'completed',
+                'Proses OLT berhasil.',
+                $result
+            );
 
             // KIRIM HASIL DAN INLINE KEYBOARD KE TELEGRAM
             if (!empty($params['chat_id'])) {
                 Log::info('JANETA TELEGRAM FORMAT TRACE', [
-                'task_id' => $task->id,
-                'operation' => '[' . $task->operation . ']',
-                'operation_length' => strlen($task->operation),
-                'result_type' => gettype($result),
-                'result_keys' => is_array($result)
-                    ? array_keys($result)
-                    : null,
-            ]);
+                    'task_id' => $task->id,
+                    'operation' => '[' . $task->operation . ']',
+                    'operation_length' => strlen($task->operation),
+                    'result_type' => gettype($result),
+                    'result_keys' => is_array($result)
+                        ? array_keys($result)
+                        : null,
+                ]);
+
                 $formattedMessage = $this->formatTelegramResult(
                     $task->operation,
                     $result
                 );
 
                 $buttons = is_array($result)
-                    ? $this->telegramActionButtons($task->operation, $result)
+                    ? $this->telegramActionButtons(
+                        $task->operation,
+                        $result
+                    )
                     : null;
 
                 $telegram->sendMessage(
@@ -111,9 +176,10 @@ class ProcessOltServices implements ShouldQueue
                 );
             }
 
-
         } catch (Throwable $e) {
-            $duration = (int) round((microtime(true) - $startedAt) * 1000);
+            $duration = (int) round(
+                (microtime(true) - $startedAt) * 1000
+            );
 
             $task->update([
                 'status' => 'failed',
@@ -122,15 +188,35 @@ class ProcessOltServices implements ShouldQueue
                 'finished_at' => now(),
             ]);
 
-            $this->broadcast($task->fresh(), 'failed', 'Proses OLT gagal.', null, $e->getMessage());
+            $task = $task->fresh();
 
-            if (!empty($task->payload['chat_id'])) {
-                $telegram->sendMessage($task->payload['chat_id'], "❌ Gagal memproses perintah: {$e->getMessage()}");
+            $this->broadcast(
+                $task,
+                'failed',
+                'Proses OLT gagal.',
+                null,
+                $e->getMessage()
+            );
+
+            $this->broadcastActivity(
+                $task,
+                'failed',
+                'Proses OLT gagal.',
+                null,
+                $e->getMessage()
+            );
+
+            if (!empty($params['chat_id'])) {
+                $telegram->sendMessage(
+                    $params['chat_id'],
+                    "❌ Gagal memproses perintah: {$e->getMessage()}"
+                );
             }
 
             throw $e;
         }
     }
+
 
         private function telegramEscape(mixed $value): string
     {
@@ -347,7 +433,6 @@ class ProcessOltServices implements ShouldQueue
 
     private function broadcast(?OltServiceRequest $task, string $status, ?string $message = null, mixed $result = null, ?string $error = null): void 
     {
-        if (! $task || ! $task->user_id) return;
 
         event(new OltServiceRequestUpdated(
             request_id: $task->uuid,
@@ -357,6 +442,20 @@ class ProcessOltServices implements ShouldQueue
             message: $message,
             result: $result,
             error: $error,
+        ));
+    }
+
+    private function broadcastActivity(
+        ?OltServiceRequest $task,
+        string $status,
+        ?string $message = null,
+        mixed $result = null,
+        ?string $error = null
+    ): void {
+        if (!$task) return;
+
+        event(new OltActivityUpdated(
+            \App\Support\OltActivityPresenter::make($task, $status, $message, $error)
         ));
     }
 }

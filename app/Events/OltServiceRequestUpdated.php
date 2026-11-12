@@ -5,6 +5,7 @@ namespace App\Events;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
+use App\Jobs\OltActivityUpdated;
 use Illuminate\Queue\SerializesModels;
 
 class OltServiceRequestUpdated implements ShouldBroadcastNow
@@ -13,7 +14,7 @@ class OltServiceRequestUpdated implements ShouldBroadcastNow
 
     public function __construct(
         public string $request_id,
-        public int $user_id,
+        public ?int $user_id,
         public string $operation,
         public string $status,
         public ?string $message = null,
@@ -23,9 +24,15 @@ class OltServiceRequestUpdated implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
-        return [
-            new PrivateChannel('users.'.$this->user_id),
+        $channels = [
+            new PrivateChannel('olt-activity'),
         ];
+
+        if ($this->user_id !== null) {
+            $channels[] = new PrivateChannel('users.' . $this->user_id);
+        }
+
+        return $channels;
     }
 
     public function broadcastAs(): string

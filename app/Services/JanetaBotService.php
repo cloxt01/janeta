@@ -11,6 +11,8 @@ use Illuminate\Support\Str;
 
 class JanetaBotService
 {
+    private array $actor = [];
+
     public function __construct(private TelegramClient $telegram, private OltService $olt) {}
 
     public function handle(array $update): void
@@ -23,6 +25,11 @@ class JanetaBotService
         if (!$message || !isset($message['chat']['id'])) return;
         
         $chatId = (string) $message['chat']['id'];
+        $this->actor = [
+            'tg_user_id' => (string) ($message['from']['id'] ?? ''),
+            'tg_name' => trim(($message['from']['first_name'] ?? '') . ' ' . ($message['from']['last_name'] ?? ''))
+                ?: ($message['from']['username'] ?? 'Telegram User'),
+        ];
         $text = trim($message['text'] ?? '');
         $entry = WhitelistEntry::where('chat_id', $chatId)->first();
         
@@ -104,6 +111,7 @@ class JanetaBotService
 
         // Sisipkan chat_id agar worker mengetahui tujuan balasan.
         $payload['chat_id'] = $chatId;
+        $payload += $this->actor;
 
         $this->send($chatId, "⏳ {$loadingText}");
 
@@ -113,6 +121,9 @@ class JanetaBotService
             'payload' => $payload,
             'status' => 'pending',
         ]);
+        event(new \App\Events\OltActivityUpdated(
+            \App\Support\OltActivityPresenter::make($request, 'pending', 'Menunggu antrean.')
+        ));
 
         ProcessOltServices::dispatch($request->id)
             ->onQueue('olt');
@@ -307,6 +318,7 @@ class JanetaBotService
         $chatId = (string) ($callback['message']['chat']['id'] ?? '');
         $fromId = (string) ($callback['from']['id'] ?? '');
         $fromName = $callback['from']['first_name'] ?? null;
+        $this->actor = ['tg_user_id' => $fromId, 'tg_name' => $fromName ?? 'Telegram User'];
         $messageId = $callback['message']['message_id'] ?? null;
 
         if (!$this->isWhitelisted($fromId)) {

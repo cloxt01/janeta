@@ -1,5 +1,7 @@
 import './bootstrap';
 import { createIcons, icons } from 'lucide';
+import Alpine from 'alpinejs';
+
 
 createIcons({ icons });
 
@@ -16,3 +18,7 @@ document.querySelectorAll('.jn-dropdown').forEach((dropdown) => {
         });
     });
 });
+
+
+window.Alpine = Alpine;
+Alpine.start();

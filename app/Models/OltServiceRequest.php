@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
@@ -33,5 +34,15 @@ class OltServiceRequest extends Model
         static::creating(function ($model) {
             $model->uuid ??= (string) Str::uuid();
         });
+    }
+
+    public function olt(): BelongsTo
+    {
+        return $this->belongsTo(Olt::class);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 }
