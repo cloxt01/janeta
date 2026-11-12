@@ -57,6 +57,11 @@ class ProcessOltServices implements ShouldQueue
         ]);
 
         $params = $task->payload ?? [];
+        $this->broadcast(
+            $task->fresh(),
+            'running',
+            'Proses OLT sedang dijalankan.'
+        );
 
         $this->broadcastActivity(
             $task->fresh(),

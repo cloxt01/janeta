@@ -33,7 +33,6 @@
                     class="{{ request()->routeIs('olt-activity*') ? 'active' : '' }}">
                         <i data-lucide="network"></i>
                         OLT Activity
-                        <span class="ml-1 inline-flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     </a>
                     <a href="{{ route('olts.ports') }}" class="{{ request()->routeIs('olts.ports') ? 'active' : '' }}"><i data-lucide="activity"></i>Port Monitor</a>
                 </div>

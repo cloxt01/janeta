@@ -141,6 +141,7 @@
     {{-- Search (tanpa action/method: kalau script gagal, form tidak navigasi ke mana-mana) --}}
     <form id="ontSearchForm"
           data-api-url="{{ route('api.ont.lookup') }}"
+          data-modem-url="{{ asset('images/modem') }}"
           class="mb-6 flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:flex-row">
         <div class="relative flex-1">
             <span class="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400">
@@ -283,6 +284,14 @@
                     <span class="text-xs text-slate-400">Hardware Info</span>
                 </div>
 
+                {{-- Gambar modem (public/images/modem/{tipe}.png) --}}
+                <div id="modemImageWrap" class="hidden mb-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                    <img id="modemImage"
+                         src=""
+                         alt="Gambar modem ONT"
+                         class="mx-auto h-21 w-auto max-w-[100px] object-contain">
+                </div>
+
                 <dl class="space-y-3 text-sm">
                     @foreach([
                         'sn' => 'Serial Number',
@@ -361,6 +370,9 @@
         const errorBox = document.getElementById('ontError');
         const resultBox = document.getElementById('ontResult');
         const emptyBox = document.getElementById('ontEmpty');
+
+        const modemWrap = document.getElementById('modemImageWrap');
+        const modemImg = document.getElementById('modemImage');
 
         const flow = {
             user: document.getElementById('flowUser'),
@@ -491,6 +503,48 @@
             setFlow(styles[status] ? status : 'processing', failedAt);
         }
 
+        function hideModemImage() {
+            modemWrap.classList.add('hidden');
+            modemImg.onload = null;
+            modemImg.onerror = null;
+            modemImg.removeAttribute('src');
+        }
+
+        /*
+         * Tampilkan gambar modem dari public/images/modem/{tipe}.png
+         * Fallback ke default.png (jika ada), kalau tidak ada juga: disembunyikan.
+         */
+        function renderModemImage(type) {
+            hideModemImage();
+
+            const model = String(type ?? '').trim();
+
+            // Abaikan kosong, "-", atau karakter aneh (cegah path traversal)
+            if (!/^[A-Za-z0-9._-]{2,40}$/.test(model) || model === '-') {
+                return;
+            }
+
+            const base = form.dataset.modemUrl;
+            let triedFallback = false;
+
+            modemImg.onload = () => {
+                modemWrap.classList.remove('hidden');
+                modemImg.alt = `Modem ${model}`;
+            };
+
+            modemImg.onerror = () => {
+                if (!triedFallback) {
+                    triedFallback = true;
+                    modemImg.src = `${base}/default.png`;
+                    return;
+                }
+
+                hideModemImage();
+            };
+
+            modemImg.src = `${base}/${encodeURIComponent(model)}.png`;
+        }
+
         function resetView() {
             errorBox.classList.add('hidden');
             errorBox.textContent = '';
@@ -500,6 +554,8 @@
 
             document.getElementById('versionWarning').classList.add('hidden');
             document.getElementById('wifiSection').classList.add('hidden');
+
+            hideModemImage();
 
             flow.oltLabel.textContent = 'OLT';
             flow.oltLabel.removeAttribute('title');
@@ -581,6 +637,7 @@
                 warning.classList.add('hidden');
             }
 
+            renderModemImage(data.type);
             renderWifi(data.wlan);
         }
 

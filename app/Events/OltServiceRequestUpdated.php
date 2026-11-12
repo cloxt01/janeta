@@ -5,7 +5,6 @@ namespace App\Events;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
-use App\Jobs\OltActivityUpdated;
 use Illuminate\Queue\SerializesModels;
 
 class OltServiceRequestUpdated implements ShouldBroadcastNow
