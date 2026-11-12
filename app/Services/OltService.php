@@ -43,10 +43,89 @@ class OltService
         $this->traceId = (string) Str::uuid();
     }
 
+
     public function names(): array
     {
         return Olt::where('is_active', true)->pluck('name')->all();
     }
+
+
+    private function translateOltFailure(string $message): string
+    {
+        $message = trim(preg_replace('/\s+/', ' ', $message));
+
+        $translations = [
+            '/The ONT can not support|The ONT cannot support/i'
+                => 'ONT tidak mendukung fitur atau perintah ini.',
+
+            '/The ONT is not online|ONT is not online/i'
+                => 'ONT sedang offline. Perintah tidak dapat dijalankan.',
+
+            '/The ONT does not exist|ONT does not exist/i'
+                => 'ONT tidak ditemukan pada port tersebut.',
+
+            '/The ONT is not exist/i'
+                => 'ONT tidak ditemukan pada port tersebut.',
+
+            '/The port does not exist|The port is not exist/i'
+                => 'Port GPON tidak ditemukan.',
+
+            '/Parameter error/i'
+                => 'Parameter perintah tidak valid.',
+
+            '/The parameter is error/i'
+                => 'Parameter perintah tidak valid.',
+
+            '/The command is not supported|Unsupported command/i'
+                => 'Perintah tidak didukung oleh OLT.',
+
+            '/Unknown command/i'
+                => 'Perintah tidak dikenal oleh OLT.',
+
+            '/Failure.*busy|Resource is busy/i'
+                => 'OLT atau ONT sedang sibuk. Silakan coba beberapa saat lagi.',
+
+            '/The operation is not allowed/i'
+                => 'OLT tidak mengizinkan operasi ini.',
+
+            '/The ONT has not been authorized|ONT is not authorized/i'
+                => 'ONT belum diotorisasi atau belum terdaftar di OLT.',
+
+            '/The ONT has already been authorized/i'
+                => 'ONT sudah terdaftar atau terotorisasi di OLT.',
+        ];
+
+        foreach ($translations as $pattern => $translation) {
+            if (preg_match($pattern, $message)) {
+                return $translation;
+            }
+        }
+
+        return "OLT mengembalikan pesan: {$message}";
+    }
+
+    /**
+     * Ambil detail pesan Failure dari respons CLI Huawei.
+     */
+    private function extractOltFailure(string $raw): ?array
+    {
+        if (!preg_match(
+            '/^\s*Failure\s*:\s*([^\r\n]+)/mi',
+            $raw,
+            $matches
+        )) {
+            return null;
+        }
+
+        $originalMessage = trim($matches[1]);
+
+        return [
+            'code' => 'OLT_FAILURE',
+            'original' => $originalMessage,
+            'message' => $this->translateOltFailure($originalMessage),
+        ];
+    }
+
 
     public function collectSnmpSnapshot(Olt $olt, string $frame = '0'): OltSnmpSnapshot
     {
@@ -136,8 +215,12 @@ class OltService
 
             $ssh = $this->session($olt);
 
-            if (!$ssh) {
-                throw new \RuntimeException('SSH session unavailable.');
+            if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
+                $this->close($olt->name);
+
+                throw new \RuntimeException(
+                    "SSH OLT {$olt->name} belum authenticated."
+                );
             }
 
             $ssh->write($command . "\n");
@@ -152,9 +235,26 @@ class OltService
                 $output .= $ssh->read('#');
             }
 
+            $maxPages = 100;
+            $page = 0;
+
             while (str_contains($output, '---- More')) {
+                if (++$page > $maxPages) {
+                    throw new \RuntimeException(
+                        "Batas pagination SSH terlampaui pada OLT {$oltName}."
+                    );
+                }
+
                 $ssh->write(" ");
-                $output .= $ssh->read('#');
+                $next = $ssh->read('#');
+
+                if ($next === false || $next === '') {
+                    throw new \RuntimeException(
+                        "Timeout saat membaca halaman SSH OLT {$oltName}."
+                    );
+                }
+
+                $output .= $next;
             }
 
             $this->debug('ssh.command.completed', [
@@ -177,55 +277,122 @@ class OltService
                 'error' => $e->getMessage(),
             ]);
 
+            $this->close($oltName);
+
             throw $e;
         }
     }
 
     private function session(Olt $olt): SSH2
     {
-        if (! $olt->ssh_enabled && $olt->connection_type !== 'ssh') {
-            throw new \RuntimeException("OLT {$olt->name} bukan koneksi SSH.");
+        if (!$olt->ssh_enabled && $olt->connection_type !== 'ssh') {
+            throw new \RuntimeException(
+                "OLT {$olt->name} bukan koneksi SSH."
+            );
         }
+
         if ($olt->transport_type !== 'tcp') {
-            throw new \RuntimeException("Koneksi SSH OLT {$olt->name} harus menggunakan TCP.");
+            throw new \RuntimeException(
+                "Koneksi SSH OLT {$olt->name} harus menggunakan TCP."
+            );
         }
 
         if (isset($this->sessions[$olt->name])) {
-            $this->debug('ssh.session.reused', ['olt' => $olt->name]);
-            return $this->sessions[$olt->name];
+            $existing = $this->sessions[$olt->name];
+
+            if ($existing->isConnected() && $existing->isAuthenticated()) {
+                $this->debug('ssh.session.reused', [
+                    'olt' => $olt->name,
+                    'authenticated' => true,
+                ]);
+
+                return $existing;
+            }
+
+            $this->debug('ssh.session.expired', [
+                'olt' => $olt->name,
+                'connected' => $existing->isConnected(),
+                'authenticated' => $existing->isAuthenticated(),
+            ]);
+
+            $existing->disconnect();
+            unset($this->sessions[$olt->name]);
         }
 
         $startedAt = microtime(true);
+
         $this->debug('ssh.session.connecting', [
             'olt' => $olt->name,
             'host' => $olt->host,
             'port' => $olt->ssh_port ?: $olt->port,
             'timeout' => config('janeta.ssh_timeout'),
         ]);
-        $ssh = new SSH2($olt->host, $olt->ssh_port ?: $olt->port, config('janeta.ssh_timeout'));
-        if (!$ssh->login($olt->ssh_username ?: $olt->username, $this->sshCredential($olt))) {
+
+        $ssh = new SSH2(
+            $olt->host,
+            $olt->ssh_port ?: $olt->port,
+            config('janeta.ssh_timeout')
+        );
+
+        $login = $ssh->login(
+            $olt->ssh_username ?: $olt->username,
+            $this->sshCredential($olt)
+        );
+
+        if (!$login || !$ssh->isAuthenticated()) {
             $this->debug('ssh.session.login_failed', [
                 'olt' => $olt->name,
-                'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
+                'connected' => $ssh->isConnected(),
+                'authenticated' => $ssh->isAuthenticated(),
             ]);
-            throw new \RuntimeException("Login SSH OLT {$olt->name} gagal.");
+
+            $ssh->disconnect();
+
+            throw new \RuntimeException(
+                "Login SSH OLT {$olt->name} gagal."
+            );
         }
-        $ssh->setTimeout(3);
+
+        $ssh->setTimeout(10);
+
+        // Masuk privileged mode.
         $ssh->write("enable\n");
-        $ssh->read('#');
-        usleep(500000);
+        $enableOutput = $ssh->read('#');
+
+        if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
+            $ssh->disconnect();
+
+            throw new \RuntimeException(
+                "SSH session OLT {$olt->name} terputus setelah enable."
+            );
+        }
+
+        usleep(300000);
+
         $ssh->write("scroll 512\n");
         $ssh->read('#');
-        usleep(150000);
+
+        if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
+            $ssh->disconnect();
+
+            throw new \RuntimeException(
+                "SSH session OLT {$olt->name} terputus saat konfigurasi terminal."
+            );
+        }
+
         $this->sessions[$olt->name] = $ssh;
+
         $this->debug('ssh.session.connected', [
             'olt' => $olt->name,
-            'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
+            'duration_ms' => round(
+                (microtime(true) - $startedAt) * 1000,
+                2
+            ),
+            'authenticated' => true,
         ]);
 
         return $ssh;
     }
-
     private function close(string $oltName): void
     {
         if (isset($this->sessions[$oltName])) {
@@ -669,34 +836,161 @@ class OltService
             ? trim($e[1])
             : '-';
 
-        $result = array_merge($details, [
-            'idcust' => $id,
-            'customerName' => $customerName,
-            'sn' => $m[3],
-            'frame' => $frame,
-            'slot' => $slot,
-            'port' => $port,
-            'ontId' => $m[2],
-            'brand' => 'Unknown',
-            'type' => $equipment,
-            'wlanType' => 'Unknown',
-            'versionAvailable' => $versionReason === null,
-            'versionReason' => $versionReason,
-        ]);
-        $this->close($found[0]);
-        return $result;
+    $result = array_merge($details, [
+        'olt' => $found[0],
+        'idcust' => $id,
+        'customerId' => $id,
+        'customerName' => $customerName,
+        'runState' => $state,
+        'state' => $state,
+        'sn' => $m[3],
+        'frame' => $frame,
+        'slot' => $slot,
+        'port' => $port,
+        'ontId' => $m[2],
+        'brand' => 'Unknown',
+        'type' => $equipment,
+        'wlanType' => 'Unknown',
+        'versionAvailable' => $versionReason === null,
+        'versionReason' => $versionReason,
+    ]);
+
+    $this->debug('ssh.ont_version.result', [
+        'olt' => $found[0],
+        'customer_id' => $id,
+        'result' => $result,
+    ]);
+
+    $this->close($found[0]);
+
+    return $result;
     }
+
+
 
 
     public function findPort(string $olt, string $frame, string $slot, string $port): ?array
     {
-        $raw = $this->command($olt, "display ont info {$frame} {$slot} {$port} all");
-        if (!$raw || str_contains($raw, 'The required port')) return null;
-        $counts = ['online' => preg_match_all('/online/i', $raw), 'offline' => preg_match_all('/offline/i', $raw), 'los' => preg_match_all('/los/i', $raw), 'dyingGasp' => preg_match_all('/dying-gasp/i', $raw)];
-        $result = compact('olt', 'frame', 'slot', 'port') + ['totalOnt' => array_sum($counts)] + $counts;
-        $this->close($olt);
-        return $result;
+        try {
+            $raw = $this->command(
+                $olt,
+                "display ont info {$frame} {$slot} {$port} all"
+            );
+
+            if (!$raw || str_contains($raw, 'The required port')) {
+                return null;
+            }
+
+            $onts = [];
+
+            $lines = preg_split('/\r\n|\r|\n/', $raw);
+
+            foreach ($lines as $line) {
+                /*
+                * Contoh:
+                * 0/ 2/1  0  48575443D3905CAA active online normal match no
+                */
+                if (!preg_match(
+                    '/^\s*\d+\/\s*\d+\/\s*\d+\s+(\d+)\s+([A-Fa-f0-9]{12,20})\s+\S+\s+(online|offline)\b/i',
+                    $line,
+                    $m
+                )) {
+                    continue;
+                }
+
+                $ontId = (int) $m[1];
+
+                $onts[$ontId] = [
+                    'ontId' => $ontId,
+                    'sn' => strtoupper($m[2]),
+                    'runState' => strtolower($m[3]),
+                    'description' => '-',
+                ];
+            }
+
+            // Ambil tabel deskripsi pelanggan.
+            // Parsing tabel Description
+            $descriptionMode = false;
+
+            foreach ($lines as $line) {
+                if (preg_match('/ONT-ID\s+Description/i', $line)) {
+                    $descriptionMode = true;
+                    continue;
+                }
+
+                if (!$descriptionMode) {
+                    continue;
+                }
+
+                if (preg_match('/In port/i', $line)) {
+                    break;
+                }
+
+                if (preg_match(
+                    '/^\s*\d+\/\s*\d+\/\s*\d+\s+(\d+)\s+(.+?)\s*$/',
+                    $line,
+                    $m
+                )) {
+                    $ontId = (int) $m[1];
+                    $description = trim($m[2]);
+
+                    if (!isset($onts[$ontId])) {
+                        continue;
+                    }
+
+                    // Pisahkan ID pelanggan dan nama pelanggan.
+                    [$customerId, $customerName] = array_pad(
+                        explode('-', $description, 2),
+                        2,
+                        '-'
+                    );
+
+                    $onts[$ontId]['description'] = $description;
+                    $onts[$ontId]['customerId'] = trim($customerId);
+                    $onts[$ontId]['customerName'] = trim($customerName);
+                }
+            }
+
+            ksort($onts);
+            $onts = array_values($onts);
+
+            $online = count(array_filter(
+                $onts,
+                fn ($ont) => $ont['runState'] === 'online'
+            ));
+
+            $offline = count(array_filter(
+                $onts,
+                fn ($ont) => $ont['runState'] === 'offline'
+            ));
+
+            Log::info('JANETA PORT SCAN PARSED', [
+                'olt' => $olt,
+                'port' => "{$frame}/{$slot}/{$port}",
+                'total' => count($onts),
+                'online' => $online,
+                'offline' => $offline,
+                'sample' => array_slice($onts, 0, 3),
+            ]);
+
+            return [
+                'olt' => $olt,
+                'frame' => $frame,
+                'slot' => $slot,
+                'port' => $port,
+                'totalOnt' => count($onts),
+                'online' => $online,
+                'offline' => $offline,
+                'los' => 0,
+                'dyingGasp' => 0,
+                'onts' => $onts,
+            ];
+        } finally {
+            $this->close($olt);
+        }
     }
+
+
 
     public function scanGponPorts(string $olt, string $frame, string $slot, int $portCount = 16): array
     {
@@ -1156,26 +1450,133 @@ class OltService
         return $result;
     }
 
+
     public function wlan(string $olt, string $frame, string $slot, string $port, string $ontId): array
     {
         $this->debug('ssh.wlan.started', compact('olt', 'frame', 'slot', 'port', 'ontId'));
+
         try {
-            $raw = $this->command($olt, "display ont wlan-info {$frame}/{$slot}/{$port} {$ontId}") ?? '';
-            if (str_contains($raw, 'Parameter error') || str_contains($raw, 'Error:')) {
-                Log::warning('OLT rejected WLAN command', [
+            $command = "display ont wlan-info {$frame}/{$slot}/{$port} {$ontId}";
+            $raw = $this->command($olt, $command) ?? '';
+
+            /*
+            * Deteksi Failure dari Huawei.
+            * Contoh:
+            * Failure: The ONT can not support
+            */
+            if (preg_match('/^\s*Failure\s*:\s*([^\r\n]+)/mi', $raw, $matches)) {
+                $originalMessage = trim($matches[1]);
+
+                $translations = [
+                    '/The ONT can not support|The ONT cannot support/i'
+                        => 'ONT tidak mendukung fitur atau perintah ini.',
+
+                    '/The ONT is not online|ONT is not online/i'
+                        => 'ONT sedang offline. Perintah tidak dapat dijalankan.',
+
+                    '/The ONT does not exist|ONT does not exist/i'
+                        => 'ONT tidak ditemukan pada port tersebut.',
+
+                    '/The port does not exist|The port is not exist/i'
+                        => 'Port GPON tidak ditemukan.',
+
+                    '/Parameter error|The parameter is error/i'
+                        => 'Parameter perintah tidak valid.',
+
+                    '/Unknown command|Unsupported command/i'
+                        => 'Perintah tidak dikenal atau tidak didukung oleh OLT.',
+
+                    '/busy|resource is occupied/i'
+                        => 'OLT atau ONT sedang sibuk. Silakan coba beberapa saat lagi.',
+
+                    '/The operation is not allowed/i'
+                        => 'OLT tidak mengizinkan operasi ini.',
+
+                    '/not authorized|not been authorized/i'
+                        => 'ONT belum diotorisasi atau belum terdaftar di OLT.',
+                ];
+
+                $translatedMessage = "OLT mengembalikan pesan: {$originalMessage}";
+
+                foreach ($translations as $pattern => $translation) {
+                    if (preg_match($pattern, $originalMessage)) {
+                        $translatedMessage = $translation;
+                        break;
+                    }
+                }
+
+                $unsupported = preg_match(
+                    '/The ONT can not support|The ONT cannot support/i',
+                    $originalMessage
+                ) === 1;
+
+                $status = $unsupported ? 'unsupported' : 'rejected';
+
+                Log::warning('OLT WLAN failure', [
                     'olt' => $olt,
-                    'command' => "display ont wlan-info {$frame}/{$slot}/{$port} {$ontId}",
+                    'command' => $command,
+                    'original_message' => $originalMessage,
+                    'translated_message' => $translatedMessage,
                 ]);
+
+                $this->debug('ssh.wlan.failure', [
+                    'olt' => $olt,
+                    'frame' => $frame,
+                    'slot' => $slot,
+                    'port' => $port,
+                    'ont_id' => $ontId,
+                    'status' => $status,
+                    'original_message' => $originalMessage,
+                    'translated_message' => $translatedMessage,
+                    'response' => $raw,
+                ]);
+
+                return [
+                    'success' => false,
+                    'status' => $status,
+                    'message' => $translatedMessage,
+                    'original_message' => $originalMessage,
+                    'raw' => $raw,
+                    'ssids' => [],
+                ];
+            }
+
+            /*
+            * Deteksi error selain Failure.
+            */
+            if (preg_match('/Parameter error|Error\s*:|Unknown command/i', $raw)) {
+                $message = 'OLT menolak perintah WLAN. Periksa parameter atau perintah yang digunakan.';
+
                 $this->debug('ssh.wlan.rejected', [
                     'olt' => $olt,
                     'frame' => $frame,
                     'slot' => $slot,
                     'port' => $port,
                     'ont_id' => $ontId,
+                    'message' => $message,
                     'response' => $raw,
                 ]);
+
+                return [
+                    'success' => false,
+                    'status' => 'rejected',
+                    'message' => $message,
+                    'original_message' => null,
+                    'raw' => $raw,
+                    'ssids' => [],
+                ];
             }
-            preg_match_all('/SSID\s*(?:Index|index)\s*:\s*(\d+)([\s\S]*?)(?=SSID\s*(?:Index|index)\s*:|Notes:|$)/i', $raw, $blocks, PREG_SET_ORDER);
+
+            /*
+            * Parsing SSID.
+            */
+            preg_match_all(
+                '/SSID\s*(?:Index|index)\s*:\s*(\d+)([\s\S]*?)(?=SSID\s*(?:Index|index)\s*:|Notes:|$)/i',
+                $raw,
+                $blocks,
+                PREG_SET_ORDER
+            );
+
             $ssids = array_map(fn ($m) => [
                 'index' => $m[1],
                 'name' => $this->field($m[2], '/(?:SSID|Service\s*set\s*identifier)\s*:\s*([^\r\n]+)/i'),
@@ -1184,15 +1585,11 @@ class OltService
                 'deviceMax' => $this->field($m[2], '/Maximum\s+associate\s+number\s*:\s*(\d+)/i'),
                 'deviceCount' => $this->field($m[2], '/Current\s+associate\s+number\s*:\s*(\d+)/i', '0'),
             ], $blocks);
-            if ($raw !== '' && empty($ssids)) {
-                Log::warning('ONT WLAN response did not contain parseable SSID blocks', [
-                    'olt' => $olt,
-                    'frame' => $frame,
-                    'slot' => $slot,
-                    'port' => $port,
-                    'ont_id' => $ontId,
-                ]);
-                $this->debug('ssh.wlan.unparseable_response', [
+
+            if (empty($ssids)) {
+                $message = 'Data WLAN tidak ditemukan atau format respons tidak dikenali.';
+
+                $this->debug('ssh.wlan.no_data', [
                     'olt' => $olt,
                     'frame' => $frame,
                     'slot' => $slot,
@@ -1200,6 +1597,15 @@ class OltService
                     'ont_id' => $ontId,
                     'response' => $raw,
                 ]);
+
+                return [
+                    'success' => false,
+                    'status' => 'no_data',
+                    'message' => $message,
+                    'original_message' => null,
+                    'raw' => $raw,
+                    'ssids' => [],
+                ];
             }
 
             $this->debug('ssh.wlan.completed', [
@@ -1210,10 +1616,17 @@ class OltService
                 'ont_id' => $ontId,
                 'ssid_count' => count($ssids),
                 'output_length' => strlen($raw),
-                'response' => $raw,
             ]);
 
-            return ['raw' => $raw, 'ssids' => $ssids];
+            return [
+                'success' => true,
+                'status' => 'success',
+                'message' => 'Data WLAN berhasil dibaca.',
+                'original_message' => null,
+                'raw' => $raw,
+                'ssids' => $ssids,
+            ];
+
         } finally {
             $this->close($olt);
         }
@@ -1357,21 +1770,225 @@ class OltService
 
 
 
+
+
     public function scanActiveAlarms(): array
     {
         $this->debug('ssh.alarms_scan.started');
+
         $alarms = [];
-        foreach ($this->names() as $olt) {
-            $raw = $this->command($olt, 'display alarm active all list') ?? '';
-            $blocks = preg_split('/\n\s*(?=\d{5,}\s+\d{2}-\d{2}-\d{4})/', $raw);
-            foreach ($blocks as $block) {
-                $type = str_contains($block, 'LOSi/LOBi') ? 'LOS' : (str_contains($block, '(DGi)') ? 'DYING-GASP' : null);
-                if (!$type || !preg_match('/FrameID\s*:\s*(\d+)/i', $block, $f) || !preg_match('/SlotID\s*:\s*(\d+)/i', $block, $s) || !preg_match('/PortID\s*:\s*(\d+)/i', $block, $p)) continue;
-                $alarms[] = ['olt' => $olt, 'frame' => $f[1], 'slot' => $s[1], 'port' => $p[1], 'type' => $type];
+        $ports = [];
+
+        $monitorConfig = config('janeta.monitor_ports', []);
+
+        foreach ($monitorConfig as $olt => $config) {
+            foreach (($config['slots'] ?? []) as $slot) {
+                foreach (($config['ports'] ?? []) as $port) {
+                    $ports[] = [
+                        'olt' => $olt,
+                        'frame' => $config['frame'] ?? 0,
+                        'slot' => $slot,
+                        'port' => $port,
+                    ];
+                }
             }
-            $this->close($olt);
         }
-        $this->debug('ssh.alarms_scan.completed', ['alarm_count' => count($alarms), 'alarms' => $alarms]);
+
+        $this->debug('ssh.alarms_scan.ports', [
+            'total_ports' => count($ports),
+        ]);
+
+        foreach ($ports as $portInfo) {
+            $olt = $portInfo['olt'];
+            $frame = (string) $portInfo['frame'];
+            $slot = (string) $portInfo['slot'];
+            $port = (string) $portInfo['port'];
+
+            $coordinate = "{$frame}/{$slot}/{$port}";
+
+            try {
+                $raw = $this->command(
+                    $olt,
+                    "display ont info {$frame} {$slot} {$port} all"
+                ) ?? '';
+
+                if (trim($raw) === '') {
+                    continue;
+                }
+
+                $raw = str_replace(["\r\n", "\r"], "\n", $raw);
+
+                foreach (explode("\n", $raw) as $line) {
+                    /*
+                    * Format tabel Huawei:
+                    * F/S/P ONT-ID SN Control-flag Run-state ...
+                    *
+                    * Contoh:
+                    * 0/ 5/13  31  48575443198554B0 active offline ...
+                    */
+                    if (!preg_match(
+                        '/^\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s+(\d+)\s+[A-Fa-f0-9]{12,20}\s+(active|deactivated)\s+(online|offline)\b/i',
+                        $line,
+                        $match
+                    )) {
+                        continue;
+                    }
+
+                    $ontId = $match[1];
+                    $controlFlag = strtolower($match[2]);
+                    $state = strtolower($match[3]);
+
+                    // Jangan hitung ONT yang dinonaktifkan.
+                    if ($controlFlag !== 'active') {
+                        continue;
+                    }
+
+                    // Hanya periksa ONT yang sedang offline.
+                    if ($state !== 'offline') {
+                        continue;
+                    }
+
+                    $detail = $this->command(
+                        $olt,
+                        "display ont info {$frame} {$slot} {$port} {$ontId}"
+                    ) ?? '';
+
+                    if (trim($detail) === '') {
+                        continue;
+                    }
+
+                    $detail = str_replace(
+                        ["\r\n", "\r"],
+                        "\n",
+                        $detail
+                    );
+
+                    // Pastikan control flag masih active dari detail ONT.
+                    if (preg_match(
+                        '/^\s*Control flag\s*:\s*(\S+)/mi',
+                        $detail,
+                        $controlMatch
+                    )) {
+                        if (strtolower(trim($controlMatch[1])) !== 'active') {
+                            continue;
+                        }
+                    }
+
+                    // Ambil Last down cause.
+                    preg_match(
+                        '/^\s*Last down cause\s*:\s*([^\r\n]+)/mi',
+                        $detail,
+                        $causeMatch
+                    );
+
+                    // Last down time opsional, bukan syarat alarm.
+                    preg_match(
+                        '/^\s*Last down time\s*:\s*([^\r\n]+)/mi',
+                        $detail,
+                        $timeMatch
+                    );
+
+                    // Ambil Equipment ID jika tersedia.
+                    preg_match(
+                        '/^\s*Equipment ID\s*:\s*([^\r\n]+)/mi',
+                        $detail,
+                        $equipmentMatch
+                    );
+
+                    $cause = trim($causeMatch[1] ?? '');
+                    $causeLower = strtolower($cause);
+
+                    $type = match (true) {
+
+                        // NONAKTIFKAN ALARM DYING GASP
+                        // ----------------------------------
+                        // str_contains($causeLower, 'dying-gasp'),
+                        // str_contains($causeLower, 'dying gasp'),
+                        // str_contains($causeLower, 'dyinggasp')
+                            // => 'DYING-GASP',
+
+                        str_contains($causeLower, 'los'),
+                        str_contains($causeLower, 'lob')
+                            => 'LOS',
+
+                        default => 'OTHER',
+                    };
+
+                    // Abaikan offline yang bukan LOS atau Dying Gasp.
+                    if ($type === 'OTHER' || $type !== 'LOS') {
+                        $this->debug('ssh.alarms_scan.ignored', [
+                            'olt' => $olt,
+                            'port' => $coordinate,
+                            'ont_id' => $ontId,
+                            'cause' => $cause,
+                        ]);
+
+                        continue;
+                    }
+
+                    $dateTime = trim($timeMatch[1] ?? '');
+
+                    $alarm = [
+                        'olt' => $olt,
+                        'alarmSn' => "{$coordinate}:{$ontId}:{$type}",
+                        'dateTime' => $dateTime,
+                        'type' => $type,
+                        'frame' => $frame,
+                        'slot' => $slot,
+                        'port' => $port,
+                        'ontId' => $ontId,
+                        'controlFlag' => $controlFlag,
+                        'runState' => $state,
+                        'equipmentId' => trim($equipmentMatch[1] ?? '-'),
+                        'alarmName' => $cause,
+                        'lastDownCause' => $cause,
+                    ];
+
+                    $alarms[] = $alarm;
+
+                    $this->debug('ssh.alarms_scan.ont_detected', [
+                        'olt' => $olt,
+                        'port' => $coordinate,
+                        'ont_id' => $ontId,
+                        'type' => $type,
+                        'cause' => $cause,
+                        'last_down_time' => $dateTime ?: null,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                $this->debug('ssh.alarms_scan.failed', [
+                    'olt' => $olt,
+                    'port' => $coordinate,
+                    'error' => $e->getMessage(),
+                ]);
+            } finally {
+                $this->close($olt);
+            }
+        }
+
+        // Hilangkan duplikat berdasarkan OLT, port, dan ONT.
+        $unique = [];
+
+        foreach ($alarms as $alarm) {
+            $key = implode(':', [
+                $alarm['olt'],
+                $alarm['frame'],
+                $alarm['slot'],
+                $alarm['port'],
+                $alarm['ontId'],
+            ]);
+
+            $unique[$key] = $alarm;
+        }
+
+        $alarms = array_values($unique);
+
+        $this->debug('ssh.alarms_scan.completed', [
+            'alarm_count' => count($alarms),
+            'alarms' => $alarms,
+        ]);
+
         return $alarms;
     }
+
 }

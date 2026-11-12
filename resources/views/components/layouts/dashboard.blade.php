@@ -17,7 +17,7 @@
     </a>
     <nav class="jn-nav">
         <a href="{{ route('dashboard') }}" class="{{ request()->routeIs('dashboard') ? 'active' : '' }}"><i data-lucide="layout-dashboard"></i>Dashboard</a>
-        <a href="{{ route('dashboard.ont') }}" class="{{ request()->routeIs('ont.*') ? 'active' : '' }}"><i data-lucide="search"></i>Cari ONT</a>
+        <a href="{{ route('dashboard.ont') }}" class="{{ request()->routeIs('dashboard.ont') ? 'active' : '' }}"><i data-lucide="search"></i>Cari ONT</a>
         @if(auth()->user()->is_admin)
             <!-- Ubah logika 'open' agar hanya aktif jika tidak diklik menutup, atau biarkan dikontrol JS -->
             <details class="jn-dropdown">

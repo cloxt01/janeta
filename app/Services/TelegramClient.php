@@ -74,12 +74,68 @@ class TelegramClient
         throw new RuntimeException("Telegram {$method} gagal setelah {$attempts} percobaan.");
     }
 
-    public function sendMessage(string|int $chatId, string $text, ?array $keyboard = null): array
-    {
-        $params = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'Markdown'];
-        if ($keyboard !== null) $params['reply_markup'] = ['inline_keyboard' => [$keyboard]];
+
+
+    public function sendMessage(
+        string|int $chatId,
+        string $text,
+        ?array $keyboard = null,
+        string $parseMode = 'Markdown'
+    ): array {
+        $params = [
+            'chat_id' => $chatId,
+            'text' => $text,
+            'parse_mode' => $parseMode,
+        ];
+
+        if ($keyboard !== null && !empty($keyboard)) {
+
+            // Kompatibilitas dengan format array tombol datar.
+            // Jika elemen pertama memiliki key "text",
+            // berarti keyboard belum dibungkus menjadi baris.
+            if (
+                isset($keyboard[0]['text']) &&
+                !isset($keyboard[0][0])
+            ) {
+                $keyboard = [$keyboard];
+            }
+
+            // Validasi struktur inline keyboard.
+            foreach ($keyboard as $row) {
+                if (!is_array($row)) {
+                    throw new RuntimeException(
+                        'Format inline keyboard tidak valid: baris harus berupa array.'
+                    );
+                }
+
+                foreach ($row as $button) {
+                    if (
+                        !is_array($button) ||
+                        empty($button['text']) ||
+                        (
+                            empty($button['callback_data']) &&
+                            empty($button['url']) &&
+                            empty($button['web_app'])
+                        )
+                    ) {
+                        throw new RuntimeException(
+                            'Format InlineKeyboardButton tidak valid.'
+                        );
+                    }
+                }
+            }
+
+            $params['reply_markup'] = [
+                'inline_keyboard' => $keyboard,
+            ];
+        }
+
         return $this->call('sendMessage', $params);
     }
+
+
+
+
 
     public function answerCallback(string $id, string $text = '', bool $alert = false): void
     {

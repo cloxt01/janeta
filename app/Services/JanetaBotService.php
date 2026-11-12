@@ -2,9 +2,12 @@
 
 namespace App\Services;
 
+use App\Jobs\ProcessOltServices;
+use App\Models\OltServiceRequest;
 use App\Models\OntAuditLog;
 use App\Models\WhitelistEntry;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class JanetaBotService
 {
@@ -18,16 +21,23 @@ class JanetaBotService
         }
         $message = $update['message'] ?? null;
         if (!$message || !isset($message['chat']['id'])) return;
+        
         $chatId = (string) $message['chat']['id'];
         $text = trim($message['text'] ?? '');
         $entry = WhitelistEntry::where('chat_id', $chatId)->first();
+        
         if (!$entry) {
-            if (str_starts_with($text, '/')) $this->send($chatId, "🚫 Akses Ditolak. Anda tidak memiliki izin.\nID Chat Anda: {$chatId}\nMinta Administrator/NOC untuk mendaftarkan ID Anda.");
+            if (str_starts_with($text, '/')) {
+                $this->send($chatId, "🚫 Akses Ditolak. Anda tidak memiliki izin.\nID Chat Anda: {$chatId}\nMinta Administrator/NOC untuk mendaftarkan ID Anda.");
+            }
             return;
         }
+        
         if (!str_starts_with($text, '/')) return;
+        
         [$command, $args] = array_pad(preg_split('/\s+/', $text, 2), 2, '');
         $command = strtolower(explode('@', $command)[0]);
+        
         try {
             match ($command) {
                 '/start', '/help' => $this->send($chatId, $this->help($message['from']['first_name'] ?? 'Rekan')),
@@ -37,19 +47,169 @@ class JanetaBotService
                 '/add_admin' => $this->addAdmin($chatId, $args, $entry->is_admin),
                 '/delete_admin' => $this->deleteAdmin($chatId, $args, $entry->is_admin),
                 '/list_admin' => $this->listAdmins($chatId),
-                '/check' => $this->check($chatId, $args),
-                '/checksn' => $this->checkSn($chatId, $args),
-                '/findport' => $this->findPort($chatId, $args),
-                '/findportont' => $this->findPortOnt($chatId, $args),
-                '/deactive' => $this->changeState($chatId, $args, false),
-                '/active' => $this->changeState($chatId, $args, true),
+                '/check' => $this->dispatchAsync($chatId, 'ont.version', ['id' => trim($args)], 'Memeriksa detail ONT...'),
+                '/checksn' => $this->dispatchAsync($chatId, 'ont.serial', ['sn' => strtoupper(trim($args))], 'Memeriksa ONT via Serial Number...'),
+                '/findport' => $this->handleFindPortAsync($chatId, $args),
+                '/findportont' => $this->handleFindPortOntAsync($chatId, $args),
+                '/deactive' => $this->dispatchAsync($chatId, 'ont.deactivate', $this->parseOntArgs($args), 'Menyiapkan deaktivasi ONT...'),
+                '/active' => $this->dispatchAsync($chatId, 'ont.activate', $this->parseOntArgs($args), 'Menyiapkan aktivasi ONT...'),
                 default => null,
             };
         } catch (\Throwable $e) {
             Log::error('JANETA command failed', ['command' => $command, 'error' => $e->getMessage()]);
-            $this->send($chatId, '❌ Terjadi gangguan internal komunikasi saat membaca data OLT.');
+            $this->send($chatId, '❌ Terjadi gangguan internal saat memproses perintah.');
         }
     }
+
+    private function hasRequiredParams(string $operation, array $payload): bool
+    {
+        $required = match ($operation) {
+            'ont.version' => ['id'],
+            'ont.serial' => ['sn'],
+            'ont.port_scan' => ['olt', 'frame', 'slot', 'port'],
+            'ont.find' => ['frame', 'slot', 'port', 'ont_id'],
+            'ont.restart',
+            'ont.activate',
+            'ont.deactivate',
+            'ont.wlan' => ['olt', 'frame', 'slot', 'port', 'ont_id'],
+            default => [],
+        };
+
+        foreach ($required as $key) {
+            if (
+                !array_key_exists($key, $payload) ||
+                trim((string) $payload[$key]) === ''
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+
+
+    private function dispatchAsync(
+        string $chatId,
+        string $operation,
+        array $payload,
+        string $loadingText
+    ): void {
+
+
+        if (!$this->hasRequiredParams($operation, $payload)) {
+            $this->send($chatId, '⚠️ Parameter perintah tidak lengkap.');
+            return;
+        }
+
+        // Sisipkan chat_id agar worker mengetahui tujuan balasan.
+        $payload['chat_id'] = $chatId;
+
+        $this->send($chatId, "⏳ {$loadingText}");
+
+        $request = OltServiceRequest::create([
+            'uuid' => (string) Str::uuid(),
+            'operation' => $operation,
+            'payload' => $payload,
+            'status' => 'pending',
+        ]);
+
+        ProcessOltServices::dispatch($request->id)
+            ->onQueue('olt');
+    }
+
+
+    private function parseOntArgs(string $args): array
+    {
+        $id = trim($args);
+        // Jika argumen berupa ID customer, lakukan lookup cepat untuk dapatkan F/S/P/ONT-ID jika diperlukan worker
+        return ['id' => $id];
+    }
+
+
+    private function handleFindPortAsync(string $chatId, string $args): void
+    {
+        $parts = preg_split('/\s+/', trim($args), 2);
+
+        if (count($parts) !== 2) {
+            $this->send(
+                $chatId,
+                '⚠️ Format salah. Contoh penggunaan: `/findport DUTA 0/2/1`'
+            );
+            return;
+        }
+
+        [$olt, $fsp] = $parts;
+
+        if (!preg_match('/^(\d+)\/(\d+)\/(\d+)$/', $fsp, $matches)) {
+            $this->send(
+                $chatId,
+                '⚠️ Format port tidak valid. Contoh: `/findport DUTA 0/2/1`'
+            );
+            return;
+        }
+
+        [$f, $s, $p] = [$matches[1], $matches[2], $matches[3]];
+
+        $this->dispatchAsync(
+            $chatId,
+            'ont.port_scan',
+            [
+                'olt' => strtoupper($olt),
+                'frame' => $f,
+                'slot' => $s,
+                'port' => $p,
+            ],
+            "Memindai port OLT {$olt} {$fsp}..."
+        );
+    }
+
+
+
+    private function handleFindPortOntAsync(string $chatId, string $args): void
+    {
+        $parts = preg_split('/\s+/', trim($args), 2);
+
+        if (count($parts) !== 2) {
+            $this->send(
+                $chatId,
+                '⚠️ Format salah. Contoh: `/findportont 0/5/13 5`'
+            );
+            return;
+        }
+
+        [$fsp, $id] = $parts;
+
+        if (
+            !preg_match('/^(\d+)\/(\d+)\/(\d+)$/', $fsp, $matches) ||
+            !ctype_digit($id)
+        ) {
+            $this->send(
+                $chatId,
+                '⚠️ Format tidak valid. Contoh: `/findportont 0/5/13 5`'
+            );
+            return;
+        }
+
+        [$f, $s, $p] = [
+            $matches[1],
+            $matches[2],
+            $matches[3],
+        ];
+
+        $this->dispatchAsync(
+            $chatId,
+            'ont.find',
+            [
+                'frame' => $f,
+                'slot' => $s,
+                'port' => $p,
+                'ont_id' => $id,
+            ],
+            "Mencari ONT ID {$id} di port {$fsp}..."
+        );
+    }
+
 
     private function send(string $chatId, string $text, ?array $buttons = null): void
     {
@@ -84,9 +244,11 @@ class JanetaBotService
     private function deleteUser(string $chatId, string $args, bool $admin): void
     {
         if (!$this->adminOnly($chatId, $admin)) return;
-        $target = trim($args); $user = WhitelistEntry::where('chat_id', $target)->where('is_admin', false)->first();
+        $target = trim($args); 
+        $user = WhitelistEntry::where('chat_id', $target)->where('is_admin', false)->first();
         if (!$user) { $this->send($chatId, '⚠️ User ID tidak ditemukan dalam whitelist.'); return; }
-        $user->delete(); $this->send($chatId, "🗑️ Berhasil menghapus akses untuk:\n👤 Nama: {$user->name}\n🔑 ID Chat: {$target}");
+        $user->delete(); 
+        $this->send($chatId, "🗑️ Berhasil menghapus akses untuk:\n👤 Nama: {$user->name}\n🔑 ID Chat: {$target}");
     }
 
     private function listUsers(string $chatId): void
@@ -114,7 +276,8 @@ class JanetaBotService
         if ($id === $chatId) { $this->send($chatId, '❌ Anda tidak bisa menghapus status admin Anda sendiri demi keamanan.'); return; }
         $user = WhitelistEntry::where('chat_id', $id)->where('is_admin', true)->first();
         if (!$user) { $this->send($chatId, '⚠️ ID Chat tersebut tidak ditemukan dalam daftar Admin.'); return; }
-        $user->update(['is_admin' => false]); $this->send($chatId, "🗑️ Berhasil menghapus status Admin untuk ID Chat: `{$id}`");
+        $user->update(['is_admin' => false]); 
+        $this->send($chatId, "🗑️ Berhasil menghapus status Admin untuk ID Chat: `{$id}`");
     }
 
     private function listAdmins(string $chatId): void
@@ -125,86 +288,18 @@ class JanetaBotService
 
     private function help(string $name): string
     {
-        return "🚀 *JANETA - JangkauNet NetOps Assistant*\nHalo *{$name}*, berikut adalah daftar perintah Anda:\n\n*OPERASIONAL GPON OLT*\n• `/check [ID_Customer]` : Cek redaman, fisik ONT, dan status WAN Internet.\n• `/checksn [Serial_Number]` : Cek redaman & WAN berdasarkan Serial Number.\n• `/findport [NAMA_OLT] [Frame]/[Slot]/[Port]` : Statistik port OLT.\n• `/findportont [Frame]/[Slot]/[Port] [ONT_ID]` : Cek ONT spesifik.\n• `/deactive [ID_Customer]` : Nonaktifkan ONT.\n• `/active [ID_Customer]` : Aktifkan kembali ONT.\n\n*ADMINISTRASI*\n• `/list` dan `/list_admin` : Lihat whitelist.\n• `/add`, `/delete`, `/add_admin`, `/delete_admin` : Kelola akses.";
+        return "🚀 *JANETA - JangkauNet NetOps Assistant*\nHalo *{$name}*, berikut adalah daftar perintah Anda:\n\n"
+            . "*OPERASIONAL GPON OLT*\n"
+            . "`/check [ID_Customer]` : Cek redaman, fisik ONT, dan status WAN Internet.\n"
+            . "`/checksn [Serial_Number]` : Cek redaman & WAN berdasarkan Serial Number.\n"
+            . "`/findport [NAMA_OLT] [Frame]/[Slot]/[Port]` : Statistik port OLT.\n"
+            . "`/findportont [Frame]/[Slot]/[Port] [ONT_ID]` : Cek ONT spesifik.\n"
+            . "`/deactive [ID_Customer]` : Nonaktifkan ONT.\n"
+            . "`/active [ID_Customer]` : Aktifkan kembali ONT.\n\n"
+            . "*ADMINISTRASI*\n"
+            . "`/list` dan `/list_admin` : Lihat whitelist.\n"
+            . "`/add`, `/delete`, `/add_admin`, `/delete_admin` : Kelola akses.";
     }
-
-    private function check(string $chatId, string $id): void
-    {
-        if (!$id) { $this->send($chatId, '⚠️ Format salah. Contoh penggunaan: /check 1JN202*********'); return; }
-        $this->report($chatId, $this->olt->byDescription($id));
-    }
-
-    private function checkSn(string $chatId, string $sn): void
-    {
-        $sn = strtoupper(trim($sn));
-        if (strlen($sn) !== 16) { $this->send($chatId, '⚠️ Serial Number tidak valid! Pastikan berjumlah tepat 16 karakter tanpa spasi.'); return; }
-        $this->report($chatId, $this->olt->bySerial($sn));
-    }
-
-    private function report(string $chatId, ?array $data): void
-    {
-        if (!$data) { $this->send($chatId, '❌ Data ONT tidak ditemukan di OLT.'); return; }
-        $suffix = "{$data['olt']}_{$data['frame']}_{$data['slot']}_{$data['port']}_{$data['ontId']}";
-
-        if (strtolower($data['runState']) === 'online') {
-            $buttons = [['text' => '📶 Cek WLAN / Wi-Fi', 'callback_data' => "wlan_{$suffix}"]];
-            if (str_starts_with($data['sn'], '48575443')) {
-                $buttons[] = ['text' => '🔄 Restart ONT', 'callback_data' => "reboot_{$suffix}"];
-            }
-            $buttons[] = ['text' => '⏸ Nonaktifkan', 'callback_data' => "deact_{$suffix}"];
-        } else {
-            $buttons = [['text' => '▶️ Aktifkan ONT', 'callback_data' => "act_{$suffix}"]];
-        }
-
-        $this->send($chatId, $this->format($data), $buttons);
-    }
-
-    private function format(array $d): string
-    {
-        $online = strtolower($d['runState']) === 'online';
-
-        $customer = "=== *HASIL PENGECEKAN ONT JANGKAUNET* ===\n\n__*[ DATA PELANGGAN ]*__\n• ID Customer: `{$d['descriptionTarget']}`\n• Nama Pelanggan: _{$d['customerName']}_\n• Frame/Slot/Port:ID: `{$d['frame']}/{$d['slot']}/{$d['port']}:{$d['ontId']}`\n• Serial Number: `{$d['sn']}`\n";
-
-        if (!$online) {
-            return $customer
-                . "• Status ONT: `" . strtoupper($d['runState']) . "`\n"
-                . "• Last Down Cause: `" . ($d['lastDownCause'] ?? '-') . "`\n"
-                . "• Last Up Time: `{$d['lastUpTime']}`\n\n"
-                . "⚠️ *Keterangan:* " . $this->olt->ontOfflineReason($d['runState']) . "\n";
-        }
-
-        $rx = $d['rxPower'];
-        $signal = $rx !== '-80.00' ? ((float) $rx < -29 || (float) $rx > -15 ? ' _(Sinyal Lemah)_' : ' *(Normal)*') : ' *(LOS)*';
-
-        return $customer . "\n__*[ INFORMASI OPTIK / FISIK ]*__\n• RX Power (ONT): *{$rx} dBm*{$signal}\n• TX Power (ONT): *{$d['txPower']} dBm*\n• OLT Rx ONT Power: *{$d['oltRxPower']} dBm*\n• Temperature: _{$d['temp']} C_\n• Voltage: _{$d['voltage']} V_\n• Status ONT: `" . strtoupper($d['runState']) . "`\n• Last Up Time: `{$d['lastUpTime']}`\n\n__*[ STATUS WAN INTERNET ]*__\n• Connection Type: `{$d['wanConnType']}`\n• IPv4 Conn Status: *{$d['wanStatus']}*\n• IPv4 Access Type: _{$d['wanAccessType']}_\n• IPv4 Address: `{$d['wanIp']}`\n• Subnet Mask: `{$d['wanSubnet']}`\n• Default Gateway: `{$d['wanGateway']}`\n• Primary DNS: `{$d['wanDns1']}`\n• Secondary DNS: `{$d['wanDns2']}`";
-    }
-
-        private function findPort(string $chatId, string $args): void
-    {
-        [$olt, $fsp] = array_pad(preg_split('/\s+/', trim($args)), 2, '');
-        [$f, $s, $p] = array_pad(explode('/', $fsp), 3, '');
-        if ($olt === '' || !ctype_digit($f) || !ctype_digit($s) || !ctype_digit($p)) {
-            $this->send($chatId, '⚠️ Format salah. Contoh penggunaan: `/findport DUTA 0/5/13`');
-            return;
-        }
-        $d = $this->olt->findPort(strtoupper($olt), $f, $s, $p);
-        if (!$d) { $this->send($chatId, '❌ Gagal menarik data port OLT.'); return; }
-        $this->send($chatId, "*LAPORAN STATUS PORT GLOBAL*\n\n• *Nama OLT:* OLT-{$d['olt']}\n• *Koordinat Port:* `{$f}/{$s}/{$p}`\n• *Total ONT Terpasang:* {$d['totalOnt']} unit\n\n* ONLINE:* {$d['online']} Perangkat\n* OFFLINE:* {$d['offline']} Perangkat\n* LOS:* {$d['los']} Perangkat\n* DYING GASP:* {$d['dyingGasp']} Perangkat");
-        
-    
-    }
-
-    private function findPortOnt(string $chatId, string $args): void
-    {
-        [$fsp, $id] = array_pad(preg_split('/\s+/', trim($args)), 2, '');
-        [$f, $s, $p] = array_pad(explode('/', $fsp), 3, '');
-        if ($fsp === '' || !ctype_digit($f) || !ctype_digit($s) || !ctype_digit($p) || !ctype_digit($id)) {
-            $this->send($chatId, '⚠️ Format salah. Contoh: `/findportont 0/5/13 5`');
-            return;
-        }
-        $this->report($chatId, $this->olt->findPortOnt($f, $s, $p, $id));
-    }
-
 
     private function callback(array $callback): void
     {
@@ -214,7 +309,6 @@ class JanetaBotService
         $fromName = $callback['from']['first_name'] ?? null;
         $messageId = $callback['message']['message_id'] ?? null;
 
-        // Semua user whitelist boleh menekan tombol; selain itu ditolak
         if (!$this->isWhitelisted($fromId)) {
             $this->telegram->answerCallback($callback['id'], 'Akses ditolak', true);
             return;
@@ -222,28 +316,103 @@ class JanetaBotService
 
         $parts = explode('_', $data);
         [, $olt, $f, $s, $p, $id] = array_pad($parts, 6, '');
-        $this->telegram->answerCallback($callback['id'], '⏳ Memproses...');
+        $this->telegram->answerCallback($callback['id'], '⏳ Memproses di background...');
         $coord = "{$f}/{$s}/{$p}:{$id}";
 
         if (str_starts_with($data, 'reboot_')) {
-            $this->olt->restart($olt, $f, $s, $p, $id);
-            $this->audit($fromId, $fromName, 'restart', $olt, $f, $s, $p, $id, ['ok' => true, 'message' => null]);
-            $this->send($chatId, "✅ *RESTART ONT BERHASIL!*\n• *Koordinat ONT:* `{$coord}`");
+            ProcessOltServices::dispatch(OltServiceRequest::create([
+                'uuid' => (string) Str::uuid(),
+                'operation' => 'ont.restart',
+                    'payload' => [
+                        'olt' => $olt,
+                        'frame' => $f,
+                        'slot' => $s,
+                        'port' => $p,
+                        'ont_id' => $id,
+                ],
+                'status' => 'pending'
+            ])->id);
+            $this->send($chatId, "🔄 Perintah restart ONT dikirim ke antrean background untuk koordinat `{$coord}`.");
+
         } elseif (str_starts_with($data, 'wlan_')) {
             $w = $this->olt->wlan($olt, $f, $s, $p, $id);
-            $text = "*📶 HASIL ANALISIS WLAN / WI-FI ONT*\n\n• *Koordinat Perangkat:* `{$coord}`\n\n";
-            foreach ($w['ssids'] as $ssid) {
-                $text .= "*[SSID INDEX {$ssid['index']}] - {$ssid['name']}*\n  • Administrative state: {$ssid['adminState']}\n  • Operational state: {$ssid['opState']}\n  • Current associate number: *{$ssid['deviceCount']} Devices*\n\n";
+
+            $header = "*📶 HASIL ANALISIS WLAN / WI-FI ONT*\n\n"
+                . "*OLT:* `{$olt}`\n"
+                . "*Koordinat Perangkat:* `{$coord}`\n\n";
+
+            // Pemeriksaan gagal
+            if (!($w['success'] ?? false)) {
+                $status = $w['status'] ?? 'error';
+
+                $statusLabel = match ($status) {
+                    'unsupported' => '⚠️ FITUR WLAN TIDAK DIDUKUNG',
+                    'rejected'    => '❌ PERINTAH DITOLAK OLT',
+                    'no_data'     => '⚠️ DATA WLAN TIDAK TERSEDIA',
+                    default       => '❌ PEMERIKSAAN WLAN GAGAL',
+                };
+
+                $text = $header
+                    . "*{$statusLabel}*\n\n"
+                    . ($w['message'] ?? 'Terjadi kesalahan saat memeriksa WLAN.');
+
+                // Tampilkan pesan asli Huawei jika tersedia
+                if (!empty($w['original_message'])) {
+                    $original = str_replace(
+                        ['`', "\n", "\r"],
+                        ["'", ' ', ' '],
+                        $w['original_message']
+                    );
+
+                    $text .= "\n\n*Detail Respons OLT:*\n"
+                        . "`{$original}`";
+                }
+
+                $this->send($chatId, $text);
+                return;
             }
-            $this->send($chatId, $text . (empty($w['ssids']) ? '⚠️ _Tidak ada SSID/Wi-Fi yang terdeteksi aktif._' : ''));
+
+            // Pemeriksaan berhasil
+            $text = $header . "✅ *DATA WLAN BERHASIL DIPEROLEH*\n\n";
+
+            foreach ($w['ssids'] as $ssid) {
+                $text .= "*[SSID INDEX {$ssid['index']}] - {$ssid['name']}*\n"
+                    . "  • Administrative state: {$ssid['adminState']}\n"
+                    . "  • Operational state: {$ssid['opState']}\n"
+                    . "  • Maximum associate number: {$ssid['deviceMax']}\n"
+                    . "  • Current associate number: *{$ssid['deviceCount']} Devices*\n\n";
+            }
+
+            $this->send($chatId, $text);
+
         } elseif (str_starts_with($data, 'cancel_')) {
             if ($messageId) {
                 $this->telegram->deleteMessage($chatId, (int) $messageId);
             }
         } elseif (str_starts_with($data, 'deact_')) {
-            $this->send($chatId, "⚠️ Yakin nonaktifkan ONT `{$coord}` di OLT {$olt}?\nPelanggan akan putus layanan.",
-                [['text' => '✅ Ya, nonaktifkan', 'callback_data' => "deactok_{$olt}_{$f}_{$s}_{$p}_{$id}"],
-                 ['text' => '❌ Batal', 'callback_data' => 'cancel_x_x_x_x_x']]);
+
+            $this->send(
+                $chatId,
+                "⚠️ *KONFIRMASI DEAKTIVASI ONT*\n\n"
+                . "• OLT: `{$olt}`\n"
+                . "• Koordinat: `{$coord}`\n\n"
+                . "Pelanggan akan kehilangan layanan internet.\n\n"
+                . "Apakah Anda yakin ingin melanjutkan?",
+
+                [
+                    [
+                        [
+                            'text' => '✅ Ya, nonaktifkan',
+                            'callback_data' => "deactok_{$olt}_{$f}_{$s}_{$p}_{$id}",
+                        ],
+                        [
+                            'text' => '❌ Batal',
+                            'callback_data' => 'cancel_x_x_x_x_x',
+                        ],
+                    ],
+                ]
+            );
+
         } elseif (str_starts_with($data, 'deactok_') || str_starts_with($data, 'act_')) {
             $activate = str_starts_with($data, 'act_');
             $r = $this->olt->setOntState($olt, $f, $s, $p, $id, $activate);
@@ -254,30 +423,6 @@ class JanetaBotService
                 $this->telegram->editReplyMarkup($chatId, (int) $messageId, ['inline_keyboard' => []]);
             }
         }
-    }
-
-    private function changeState(string $chatId, string $id, bool $activate): void
-    {
-        $id = trim($id);
-        if (!$id) {
-            $this->send($chatId, '⚠️ Format salah. Contoh: `/' . ($activate ? 'active' : 'deactive') . ' 1JN202307000322`');
-            return;
-        }
-        $d = $this->olt->byDescription($id);
-        if (!$d) { $this->send($chatId, '❌ Data ONT tidak ditemukan di OLT.'); return; }
-
-        $coord = "{$d['frame']}/{$d['slot']}/{$d['port']}:{$d['ontId']}";
-        $suffix = "{$d['olt']}_{$d['frame']}_{$d['slot']}_{$d['port']}_{$d['ontId']}";
-
-        if ($activate) {
-            $this->send($chatId, "ℹ️ Aktifkan ONT `{$coord}` ({$d['customerName']}) di OLT {$d['olt']}?",
-                [['text' => '✅ Ya, aktifkan', 'callback_data' => "act_{$suffix}"],
-                 ['text' => '❌ Batal', 'callback_data' => 'cancel_x_x_x_x_x']]);
-            return;
-        }
-        $this->send($chatId, "⚠️ Yakin nonaktifkan ONT `{$coord}`?\n👤 {$d['customerName']}\n🏢 OLT {$d['olt']}\n\nPelanggan akan putus layanan.",
-            [['text' => '✅ Ya, nonaktifkan', 'callback_data' => "deactok_{$suffix}"],
-             ['text' => '❌ Batal', 'callback_data' => 'cancel_x_x_x_x_x']]);
     }
 
     private function audit(string $chatId, ?string $name, string $action, string $olt, string $f, string $s, string $p, string $id, array $result): void
