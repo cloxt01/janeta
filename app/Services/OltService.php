@@ -6,6 +6,7 @@ use phpseclib3\Net\SSH2;
 use phpseclib3\Crypt\PublicKeyLoader;
 use App\Models\Olt;
 use App\Models\OltSnmpSnapshot;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -36,11 +37,23 @@ class OltService
     ];
 
     private array $sessions = [];
+
+    /** Slot sesi SSH yang sedang dipegang proses ini (per nama OLT). */
+    private array $slotLocks = [];
+
     private string $traceId;
 
     public function __construct()
     {
         $this->traceId = (string) Str::uuid();
+    }
+
+    public function __destruct()
+    {
+        // Pengaman: lepas semua slot kalau object dibuang sebelum close() dipanggil.
+        foreach (array_keys($this->slotLocks) as $oltName) {
+            $this->releaseSlot($oltName);
+        }
     }
 
 
@@ -283,6 +296,64 @@ class OltService
         }
     }
 
+    /**
+     * Ambil satu slot sesi SSH untuk OLT (semaphore lintas worker via cache lock).
+     * Maksimal sesi per OLT diatur lewat OLT_SSH_SESSION.
+     */
+    private function acquireSlot(Olt $olt): void
+    {
+        if (isset($this->slotLocks[$olt->name])) {
+            return;
+        }
+
+        $max = max(1, (int) config('janeta.ssh_max_sessions', 3));
+        $wait = (int) config('janeta.ssh_session_wait', 120);
+        $ttl = (int) config('janeta.ssh_session_lock_ttl', 360);
+        $deadline = microtime(true) + $wait;
+
+        do {
+            for ($i = 1; $i <= $max; $i++) {
+                $lock = Cache::lock("olt-ssh:{$olt->id}:slot:{$i}", $ttl);
+
+                if ($lock->get()) {
+                    $this->slotLocks[$olt->name] = $lock;
+
+                    $this->debug('ssh.slot.acquired', [
+                        'olt' => $olt->name,
+                        'slot' => $i,
+                        'max' => $max,
+                    ]);
+
+                    return;
+                }
+            }
+
+            usleep(random_int(300_000, 700_000));
+        } while (microtime(true) < $deadline);
+
+        throw new \RuntimeException(
+            "Semua {$max} sesi SSH OLT {$olt->name} sedang dipakai. Coba lagi sebentar."
+        );
+    }
+
+    private function releaseSlot(string $oltName): void
+    {
+        if (isset($this->slotLocks[$oltName])) {
+            try {
+                $this->slotLocks[$oltName]->release();
+            } catch (\Throwable $e) {
+                Log::warning('Gagal melepas slot sesi SSH', [
+                    'olt' => $oltName,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            unset($this->slotLocks[$oltName]);
+
+            $this->debug('ssh.slot.released', ['olt' => $oltName]);
+        }
+    }
+
     private function session(Olt $olt): SSH2
     {
         if (!$olt->ssh_enabled && $olt->connection_type !== 'ssh') {
@@ -317,82 +388,94 @@ class OltService
 
             $existing->disconnect();
             unset($this->sessions[$olt->name]);
+            $this->releaseSlot($olt->name);
         }
 
-        $startedAt = microtime(true);
+        // Tunggu slot kosong sebelum membuka koneksi baru ke OLT.
+        $this->acquireSlot($olt);
 
-        $this->debug('ssh.session.connecting', [
-            'olt' => $olt->name,
-            'host' => $olt->host,
-            'port' => $olt->ssh_port ?: $olt->port,
-            'timeout' => config('janeta.ssh_timeout'),
-        ]);
+        try {
+            $startedAt = microtime(true);
 
-        $ssh = new SSH2(
-            $olt->host,
-            $olt->ssh_port ?: $olt->port,
-            config('janeta.ssh_timeout')
-        );
-
-        $login = $ssh->login(
-            $olt->ssh_username ?: $olt->username,
-            $this->sshCredential($olt)
-        );
-
-        if (!$login || !$ssh->isAuthenticated()) {
-            $this->debug('ssh.session.login_failed', [
+            $this->debug('ssh.session.connecting', [
                 'olt' => $olt->name,
-                'connected' => $ssh->isConnected(),
-                'authenticated' => $ssh->isAuthenticated(),
+                'host' => $olt->host,
+                'port' => $olt->ssh_port ?: $olt->port,
+                'timeout' => config('janeta.ssh_timeout'),
             ]);
 
-            $ssh->disconnect();
-
-            throw new \RuntimeException(
-                "Login SSH OLT {$olt->name} gagal."
+            $ssh = new SSH2(
+                $olt->host,
+                $olt->ssh_port ?: $olt->port,
+                config('janeta.ssh_timeout')
             );
-        }
 
-        $ssh->setTimeout(10);
-
-        // Masuk privileged mode.
-        $ssh->write("enable\n");
-        $enableOutput = $ssh->read('#');
-
-        if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
-            $ssh->disconnect();
-
-            throw new \RuntimeException(
-                "SSH session OLT {$olt->name} terputus setelah enable."
+            $login = $ssh->login(
+                $olt->ssh_username ?: $olt->username,
+                $this->sshCredential($olt)
             );
+
+            if (!$login || !$ssh->isAuthenticated()) {
+                $this->debug('ssh.session.login_failed', [
+                    'olt' => $olt->name,
+                    'connected' => $ssh->isConnected(),
+                    'authenticated' => $ssh->isAuthenticated(),
+                ]);
+
+                $ssh->disconnect();
+
+                throw new \RuntimeException(
+                    "Login SSH OLT {$olt->name} gagal."
+                );
+            }
+
+            $ssh->setTimeout(10);
+
+            // Masuk privileged mode.
+            $ssh->write("enable\n");
+            $enableOutput = $ssh->read('#');
+
+            if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
+                $ssh->disconnect();
+
+                throw new \RuntimeException(
+                    "SSH session OLT {$olt->name} terputus setelah enable."
+                );
+            }
+
+            usleep(300000);
+
+            $ssh->write("scroll 512\n");
+            $ssh->read('#');
+
+            if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
+                $ssh->disconnect();
+
+                throw new \RuntimeException(
+                    "SSH session OLT {$olt->name} terputus saat konfigurasi terminal."
+                );
+            }
+
+            $this->sessions[$olt->name] = $ssh;
+
+            $this->debug('ssh.session.connected', [
+                'olt' => $olt->name,
+                'duration_ms' => round(
+                    (microtime(true) - $startedAt) * 1000,
+                    2
+                ),
+                'authenticated' => true,
+            ]);
+
+            return $ssh;
+        } catch (\Throwable $e) {
+            // Koneksi gagal: kembalikan slot supaya job lain bisa masuk.
+            $this->releaseSlot($olt->name);
+
+            throw $e;
         }
-
-        usleep(300000);
-
-        $ssh->write("scroll 512\n");
-        $ssh->read('#');
-
-        if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
-            $ssh->disconnect();
-
-            throw new \RuntimeException(
-                "SSH session OLT {$olt->name} terputus saat konfigurasi terminal."
-            );
-        }
-
-        $this->sessions[$olt->name] = $ssh;
-
-        $this->debug('ssh.session.connected', [
-            'olt' => $olt->name,
-            'duration_ms' => round(
-                (microtime(true) - $startedAt) * 1000,
-                2
-            ),
-            'authenticated' => true,
-        ]);
-
-        return $ssh;
     }
+
     private function close(string $oltName): void
     {
         if (isset($this->sessions[$oltName])) {
@@ -400,6 +483,8 @@ class OltService
             unset($this->sessions[$oltName]);
             $this->debug('ssh.session.closed', ['olt' => $oltName]);
         }
+
+        $this->releaseSlot($oltName);
     }
 
     public function testConnection(string $oltName): array
@@ -586,6 +671,9 @@ class OltService
                     ]);
                     return [$name, $raw];
                 }
+
+                // OLT ini tidak cocok: tutup sesi supaya slotnya langsung bebas.
+                $this->close($name);
             } catch (\Throwable $e) {
                 Log::warning('OLT command failed', ['olt' => $name, 'error' => $e->getMessage()]);
                 $this->debug('ssh.search.failed', [
@@ -616,32 +704,43 @@ class OltService
             ?? $this->search('display ont info by-desc "' . $id . '"');
 
         if (!$found || !preg_match('/(\d+\s*\/\s*\d+\s*\/\s*\d+)\s+(\d+)\s+([A-Z0-9]{16})\s+\w+\s+(\w+)/i', $found[1], $m)) {
+            if ($found) {
+                $this->close($found[0]);
+            }
+
             return null;
         }
 
-        $data = $this->parse($m, $found[1], $found[0], $id);
-        $data['descriptionTarget'] = $id;
-        $data['customerName'] = trim($data['customerName']);
-        $result = $this->details($data);
-        $this->close($found[0]);
-        return $result;
+        try {
+            $data = $this->parse($m, $found[1], $found[0], $id);
+            $data['descriptionTarget'] = $id;
+            $data['customerName'] = trim($data['customerName']);
+
+            return $this->details($data);
+        } finally {
+            $this->close($found[0]);
+        }
     }
 
     public function bySerial(string $sn): ?array
     {
         $found = $this->search("display ont info by-sn {$sn}");
         if (!$found) return null;
-        if (!preg_match('/F\/S\/P\s*:\s*([.\/\d]+)/i', $found[1], $fsp) ||
-            !preg_match('/ONT-ID\s*:\s*(\d+)/i', $found[1], $ontId) ||
-            !preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $state)) return null;
-        $serial = preg_match('/SN\s*:\s*([A-Z0-9]{16})/i', $found[1], $serialMatch) ? $serialMatch[1] : $sn;
-        $description = preg_match('/Description\s*:\s*([^\r\n]+)/i', $found[1], $descriptionMatch) ? trim($descriptionMatch[1]) : '-';
-        [$frame, $slot, $port] = explode('/', trim($fsp[1]));
-        [$customerId, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
-        $data = compact('frame', 'slot', 'port') + ['olt' => $found[0], 'ontId' => $ontId[1], 'sn' => $serial, 'state' => $state[1], 'customerId' => trim($customerId), 'customerName' => trim($customerName), 'descriptionTarget' => trim($customerId)];
-        $result = $this->details($data);
-        $this->close($found[0]);
-        return $result;
+
+        try {
+            if (!preg_match('/F\/S\/P\s*:\s*([.\/\d]+)/i', $found[1], $fsp) ||
+                !preg_match('/ONT-ID\s*:\s*(\d+)/i', $found[1], $ontId) ||
+                !preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $state)) return null;
+            $serial = preg_match('/SN\s*:\s*([A-Z0-9]{16})/i', $found[1], $serialMatch) ? $serialMatch[1] : $sn;
+            $description = preg_match('/Description\s*:\s*([^\r\n]+)/i', $found[1], $descriptionMatch) ? trim($descriptionMatch[1]) : '-';
+            [$frame, $slot, $port] = explode('/', trim($fsp[1]));
+            [$customerId, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
+            $data = compact('frame', 'slot', 'port') + ['olt' => $found[0], 'ontId' => $ontId[1], 'sn' => $serial, 'state' => $state[1], 'customerId' => trim($customerId), 'customerName' => trim($customerName), 'descriptionTarget' => trim($customerId)];
+
+            return $this->details($data);
+        } finally {
+            $this->close($found[0]);
+        }
     }
 
     private function details(array $data): array
@@ -661,8 +760,13 @@ class OltService
         $value = function (string $pattern, string $default) use ($raw): string {
             return preg_match($pattern, $raw, $m) ? trim($m[1]) : $default;
         };
+
         return array_merge($data, [
-            'runState' => $data['state'], 'rxPower' => $value('/Rx\s*optical\s*power(?:\(dBm\))?\s*:\s*([-\d.]+)/i', '-80.00'),
+            'runState' => $data['state'], 
+            'controlFlag' => strtolower(
+                $infoValue('/Control\s*flag\s*:\s*([^\r\n]+)/i')
+            ),
+            'rxPower' => $value('/Rx\s*optical\s*power(?:\(dBm\))?\s*:\s*([-\d.]+)/i', '-80.00'),
             'txPower' => $value('/Tx\s*optical\s*power(?:\(dBm\))?\s*:\s*([-\d.]+)/i', '-80.00'),
             'oltRxPower' => $value('/OLT\s*Rx\s*ONT\s*optical\s*power(?:\(dBm\))?\s*:\s*([-\d.]+)/i', '-80.00'),
             'temp' => $value('/Temperature(?:\(C\))?\s*:\s*([\d.]+)/i', '-'), 'voltage' => $value('/Voltage(?:\(V\))?\s*:\s*([\d.]+)/i', '0'),
@@ -695,15 +799,15 @@ class OltService
         foreach ($formats as [$format, $hasZone]) {
             try {
                 $date = \Carbon\Carbon::createFromFormat($format, $value);
-                
+
                 // Ubah format output sesuai keinginan, contoh: 'd M Y, H:i:s' (08 Nov 2026, 20:56:12)
-                return $date->format('d-m-Y H:i:s'); 
+                return $date->format('d-m-Y H:i:s');
             } catch (\Throwable) {
                 // coba format berikutnya
             }
         }
 
-        return $value; 
+        return $value;
     }
 
     public function apiByDescription(string $id): ?array
@@ -794,76 +898,84 @@ class OltService
                 'customer_id' => $id,
                 'response' => $found[1] ?? null,
             ]);
+
+            if ($found) {
+                $this->close($found[0]);
+            }
+
             return null;
         }
-        [$frame, $slot, $port] = explode('/', preg_replace('/\s+/', '', $m[1]));
-        $state = $m[5];
-        if (preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $stateMatch)) {
-            $state = $stateMatch[1];
-        }
 
-        $description = $this->extractDescription($found[1], $id);
-        [, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
-        $customerName = trim($customerName) ?: '-';
-
-        $stateLower = strtolower($state);
-        $raw = '';
-        $versionReason = null;
-
-        if ($stateLower === 'online') {
-            $raw = $this->command($found[0], "display ont version {$frame} {$slot} {$port} {$m[2]}") ?? '';
-            if (preg_match('/Failure\s*:\s*([^\r\n]+)/i', $raw, $failure)) {
-                $versionReason = $this->versionFailureReason(trim($failure[1]), $state);
+        try {
+            [$frame, $slot, $port] = explode('/', preg_replace('/\s+/', '', $m[1]));
+            $state = $m[5];
+            if (preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $stateMatch)) {
+                $state = $stateMatch[1];
             }
-        } else {
-            $versionReason = $this->ontOfflineReason($state);
+
+            $description = $this->extractDescription($found[1], $id);
+            [, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
+            $customerName = trim($customerName) ?: '-';
+
+            $stateLower = strtolower($state);
+            $raw = '';
+            $versionReason = null;
+
+            if ($stateLower === 'online') {
+                $raw = $this->command($found[0], "display ont version {$frame} {$slot} {$port} {$m[2]}") ?? '';
+                if (preg_match('/Failure\s*:\s*([^\r\n]+)/i', $raw, $failure)) {
+                    $versionReason = $this->versionFailureReason(trim($failure[1]), $state);
+                }
+            } else {
+                $versionReason = $this->ontOfflineReason($state);
+            }
+
+            $details = $this->details([
+                'olt' => $found[0],
+                'frame' => $frame,
+                'slot' => $slot,
+                'port' => $port,
+                'ontId' => $m[2],
+                'sn' => $m[3],
+                'state' => $state,
+                'customerId' => $id,
+                'customerName' => $customerName,
+                'descriptionTarget' => $id,
+            ]);
+
+            $equipment = ($versionReason === null && preg_match('/Equipment-ID\s*:\s*([^\r\n]+)/i', $raw, $e))
+                ? trim($e[1])
+                : '-';
+
+            $result = array_merge($details, [
+                'olt' => $found[0],
+                'idcust' => $id,
+                'customerId' => $id,
+                'customerName' => $customerName,
+                'runState' => $state,
+                'state' => $state,
+                'sn' => $m[3],
+                'frame' => $frame,
+                'slot' => $slot,
+                'port' => $port,
+                'ontId' => $m[2],
+                'brand' => 'Unknown',
+                'type' => $equipment,
+                'wlanType' => 'Unknown',
+                'versionAvailable' => $versionReason === null,
+                'versionReason' => $versionReason,
+            ]);
+
+            $this->debug('ssh.ont_version.result', [
+                'olt' => $found[0],
+                'customer_id' => $id,
+                'result' => $result,
+            ]);
+
+            return $result;
+        } finally {
+            $this->close($found[0]);
         }
-
-        $details = $this->details([
-            'olt' => $found[0],
-            'frame' => $frame,
-            'slot' => $slot,
-            'port' => $port,
-            'ontId' => $m[2],
-            'sn' => $m[3],
-            'state' => $state,
-            'customerId' => $id,
-            'customerName' => $customerName,
-            'descriptionTarget' => $id,
-        ]);
-
-        $equipment = ($versionReason === null && preg_match('/Equipment-ID\s*:\s*([^\r\n]+)/i', $raw, $e))
-            ? trim($e[1])
-            : '-';
-
-    $result = array_merge($details, [
-        'olt' => $found[0],
-        'idcust' => $id,
-        'customerId' => $id,
-        'customerName' => $customerName,
-        'runState' => $state,
-        'state' => $state,
-        'sn' => $m[3],
-        'frame' => $frame,
-        'slot' => $slot,
-        'port' => $port,
-        'ontId' => $m[2],
-        'brand' => 'Unknown',
-        'type' => $equipment,
-        'wlanType' => 'Unknown',
-        'versionAvailable' => $versionReason === null,
-        'versionReason' => $versionReason,
-    ]);
-
-    $this->debug('ssh.ont_version.result', [
-        'olt' => $found[0],
-        'customer_id' => $id,
-        'result' => $result,
-    ]);
-
-    $this->close($found[0]);
-
-    return $result;
     }
 
 
@@ -1442,12 +1554,22 @@ class OltService
     public function findPortOnt(string $frame, string $slot, string $port, string $ontId): ?array
     {
         $found = $this->search("display ont info {$frame} {$slot} {$port} {$ontId}");
-        if (!$found || !preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $s) || !preg_match('/SN\s*:\s*([A-Z0-9]{16})/i', $found[1], $sn)) return null;
-        $description = preg_match('/Description\s*:\s*([^\r\n]+)/i', $found[1], $d) ? trim($d[1]) : '-';
-        [$id, $name] = array_pad(explode('-', $description, 2), 2, '-');
-        $result = $this->details(['olt' => $found[0], 'frame' => $frame, 'slot' => $slot, 'port' => $port, 'ontId' => $ontId, 'sn' => $sn[1], 'state' => $s[1], 'customerId' => $id, 'customerName' => $name, 'descriptionTarget' => $id]);
-        $this->close($found[0]);
-        return $result;
+        if (!$found) {
+            return null;
+        }
+
+        try {
+            if (!preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $s) || !preg_match('/SN\s*:\s*([A-Z0-9]{16})/i', $found[1], $sn)) {
+                return null;
+            }
+
+            $description = preg_match('/Description\s*:\s*([^\r\n]+)/i', $found[1], $d) ? trim($d[1]) : '-';
+            [$id, $name] = array_pad(explode('-', $description, 2), 2, '-');
+
+            return $this->details(['olt' => $found[0], 'frame' => $frame, 'slot' => $slot, 'port' => $port, 'ontId' => $ontId, 'sn' => $sn[1], 'state' => $s[1], 'customerId' => $id, 'customerName' => $name, 'descriptionTarget' => $id]);
+        } finally {
+            $this->close($found[0]);
+        }
     }
 
 

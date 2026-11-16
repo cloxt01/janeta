@@ -1,4 +1,5 @@
 import './bootstrap';
+import './janeta-loading';
 import { createIcons, icons } from 'lucide';
 import Alpine from 'alpinejs';
 
@@ -22,3 +23,7 @@ document.querySelectorAll('.jn-dropdown').forEach((dropdown) => {
 
 window.Alpine = Alpine;
 Alpine.start();
+
+document.addEventListener('DOMContentLoaded', () => {
+    initJanetaLoading();
+});

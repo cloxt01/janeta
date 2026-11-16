@@ -28,8 +28,23 @@ Route::middleware('auth')->group(function () {
     Route::get('/dashboard/ont', [DashboardController::class, 'ontLookup'])
         ->name('dashboard.ont');
 
+    // ONT PROCESSING
+    Route::prefix('portal/ont')->name('portal.ont.')->group(function () {
+
+        Route::get('/processing/{uuid}', [OntController::class, 'processing'])
+            ->name('processing');
+
+        Route::get('/request-status/{uuid}', [OntController::class, 'requestStatus'])
+            ->name('request-status');
+
+        Route::get('/result/{uuid}', [OntController::class, 'result'])
+            ->name('result');
+    });
+
     // ONT API
     Route::prefix('api/v1/ont')->name('api.ont.')->group(function () {
+        Route::post('/control', [OntController::class, 'control'])
+            ->name('control');
 
         Route::get('/lookup', [OntController::class, 'lookup'])
             ->name('lookup');

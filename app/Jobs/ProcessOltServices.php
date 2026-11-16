@@ -20,7 +20,7 @@ class ProcessOltServices implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    public int $tries = 3;
     public int $timeout = 300;
 
     public function __construct(
@@ -309,6 +309,7 @@ class ProcessOltServices implements ShouldQueue
         if (in_array($operation, [
             'ont.version',
             'ont.lookup',
+            'ont.serial',
         ], true)) {
             $online = strtolower((string) ($result['runState'] ?? '')) === 'online';
 
@@ -372,16 +373,14 @@ class ProcessOltServices implements ShouldQueue
 
 
 
+
     private function telegramActionButtons(string $operation, array $result): ?array
     {
-        // Tombol aksi hanya untuk hasil pengecekan ONT.
-
-        if (!in_array($operation, ['ont.version', 'ont.lookup'], true)) {
-            return null;
-        }
-
-        // Jangan tampilkan aksi jika ONT offline.
-        if (strtolower($result['runState'] ?? '') !== 'online') {
+        if (!in_array($operation, [
+            'ont.version',
+            'ont.lookup',
+            'ont.serial',
+        ], true)) {
             return null;
         }
 
@@ -413,6 +412,32 @@ class ProcessOltServices implements ShouldQueue
 
         $coordinate = "{$olt}_{$frame}_{$slot}_{$port}_{$ontId}";
 
+        $controlFlag = strtolower(trim(
+            (string) ($result['controlFlag'] ?? '')
+        ));
+
+        $runState = strtolower(trim(
+            (string) ($result['runState'] ?? '')
+        ));
+
+        // ONT DEACTIVE: hanya tampilkan tombol aktivasi.
+        if (in_array($controlFlag, ['deactive', 'deactivated'], true)) {
+            return [
+                [
+                    [
+                        'text' => '🟢 Aktifkan ONT',
+                        'callback_data' => "act_{$coordinate}",
+                    ],
+                ],
+            ];
+        }
+
+        // ONT harus online untuk menampilkan aksi normal.
+        if ($runState !== 'online') {
+            return null;
+        }
+
+        // ONT ACTIVE: tampilkan tombol operasional.
         return [
             [
                 [
@@ -434,6 +459,7 @@ class ProcessOltServices implements ShouldQueue
             ],
         ];
     }
+
 
 
     private function broadcast(?OltServiceRequest $task, string $status, ?string $message = null, mixed $result = null, ?string $error = null): void 
