@@ -23,7 +23,3 @@ document.querySelectorAll('.jn-dropdown').forEach((dropdown) => {
 
 window.Alpine = Alpine;
 Alpine.start();
-
-document.addEventListener('DOMContentLoaded', () => {
-    initJanetaLoading();
-});
