@@ -12,6 +12,7 @@ use Illuminate\Support\Str;
 
 class OltService
 {
+    private const PROMPT_REGEX = '/(?:\{[^{}]*<cr>[^{}]*\}\s*:|-{2,}\s*More\b[^\r\n]*?-{2,}|[\w.\-]+(?:\([\w.\-\/]+\))*#)\s*$/';
     private const SYSTEM_DESCRIPTION_OID = '1.3.6.1.2.1.1.1.0';
     private const INTERFACE_DESCRIPTION_OID = '1.3.6.1.2.1.2.2.1.2';
     private const INTERFACE_STATUS_OID = '1.3.6.1.2.1.2.2.1.8';
@@ -38,7 +39,6 @@ class OltService
 
     private array $sessions = [];
 
-    /** Slot sesi SSH yang sedang dipegang proses ini (per nama OLT). */
     private array $slotLocks = [];
 
     private string $traceId;
@@ -62,6 +62,52 @@ class OltService
         return Olt::where('is_active', true)->pluck('name')->all();
     }
 
+    private function readUntilPrompt(SSH2 $ssh, string $oltName): string
+    {
+        $output = '';
+        $guard = 0;
+
+        while (true) {
+            if (++$guard > 300) {
+                throw new \RuntimeException(
+                    "Batas pembacaan output SSH terlampaui pada OLT {$oltName}."
+                );
+            }
+
+            $chunk = $ssh->read(self::PROMPT_REGEX, SSH2::READ_REGEX);
+
+            if ($chunk === false || $ssh->isTimeout()) {
+                throw new \RuntimeException(
+                    "Timeout menunggu respons/prompt OLT {$oltName}."
+                );
+            }
+
+            $output .= $chunk;
+
+            if (preg_match('/\{[^{}]*<cr>[^{}]*\}\s*:\s*$/', $chunk)) {
+                $ssh->write("\n");
+                continue;
+            }
+
+            if (preg_match('/-{2,}\s*More\b[^\r\n]*?-{2,}\s*$/', $chunk)) {
+                $ssh->write(' ');
+                continue;
+            }
+
+            break;
+        }
+
+        // Bersihkan sisa kontrol pagination dan escape sequence.
+        $clean = preg_replace('/\x1b\[[0-9;]*[A-Za-z]/', '', $output) ?? $output;
+        $clean = preg_replace('/-{2,}\s*More\b[^\r\n]*?-{2,}/', '', $clean) ?? $clean;
+
+        return str_replace("\x08", '', $clean);
+    }
+
+    private function descriptionMatches(string $description, string $id): bool
+    {
+        return str_starts_with(strtolower(trim($description)), strtolower(trim($id)));
+    }
 
     private function translateOltFailure(string $message): string
     {
@@ -237,51 +283,18 @@ class OltService
             }
 
             $ssh->write($command . "\n");
-
-            $output = $ssh->read('#');
-
-            if (
-                str_contains($output, '{ <cr>||<K> }') ||
-                str_contains($output, '<cr>')
-            ) {
-                $ssh->write("\n");
-                $output .= $ssh->read('#');
-            }
-
-            $maxPages = 100;
-            $page = 0;
-
-            while (str_contains($output, '---- More')) {
-                if (++$page > $maxPages) {
-                    throw new \RuntimeException(
-                        "Batas pagination SSH terlampaui pada OLT {$oltName}."
-                    );
-                }
-
-                $ssh->write(" ");
-                $next = $ssh->read('#');
-
-                if ($next === false || $next === '') {
-                    throw new \RuntimeException(
-                        "Timeout saat membaca halaman SSH OLT {$oltName}."
-                    );
-                }
-
-                $output .= $next;
-            }
+            $output = $this->readUntilPrompt($ssh, $oltName);
 
             $this->debug('ssh.command.completed', [
                 'olt' => $oltName,
                 'command' => $command,
-                'duration_ms' => round(
-                    (microtime(true) - $startedAt) * 1000,
-                    2
-                ),
+                'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
                 'output_length' => strlen($output),
-                'output' => $output,
+                // Output penuh bisa 12 KB per perintah; batasi agar log tidak berat.
+                'output' => substr($output, 0, (int) config('janeta.debug_output_limit', 2000)),
             ]);
 
-            return $output ?: null;
+            return $output !== '' ? $output : null;
 
         } catch (\Throwable $e) {
             $this->debug('ssh.command.failed', [
@@ -295,7 +308,6 @@ class OltService
             throw $e;
         }
     }
-
     /**
      * Ambil satu slot sesi SSH untuk OLT (semaphore lintas worker via cache lock).
      * Maksimal sesi per OLT diatur lewat OLT_SSH_SESSION.
@@ -429,12 +441,10 @@ class OltService
                 );
             }
 
-            $ssh->setTimeout(10);
+            $ssh->setTimeout(15);
 
-            // Masuk privileged mode.
             $ssh->write("enable\n");
-            $enableOutput = $ssh->read('#');
-
+            $ssh->read('#');
             if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
                 $ssh->disconnect();
 
@@ -443,10 +453,10 @@ class OltService
                 );
             }
 
-            usleep(300000);
+// (usleep(300000) dihapus: tidak diperlukan)
 
             $ssh->write("scroll 512\n");
-            $ssh->read('#');
+            $this->readUntilPrompt($ssh, $olt->name);
 
             if (!$ssh->isConnected() || !$ssh->isAuthenticated()) {
                 $ssh->disconnect();
@@ -455,6 +465,8 @@ class OltService
                     "SSH session OLT {$olt->name} terputus saat konfigurasi terminal."
                 );
             }
+
+            $ssh->setTimeout((int) config('janeta.ssh_command_timeout', 30));
 
             $this->sessions[$olt->name] = $ssh;
 
@@ -724,8 +736,17 @@ class OltService
 
     public function bySerial(string $sn): ?array
     {
-        $found = $this->search("display ont info by-sn {$sn}");
-        if (!$found) return null;
+        $command = "display ont info by-sn {$sn}";
+        $hintKey = 'olt:sn-olt:' . $sn;
+
+        $hint = Cache::get($hintKey);
+        $found = ($hint ? $this->search($command, $hint) : null) ?? $this->search($command);
+
+        if (!$found) {
+            return null;
+        }
+
+        Cache::put($hintKey, $found[0], now()->addDays(30));
 
         try {
             if (!preg_match('/F\/S\/P\s*:\s*([.\/\d]+)/i', $found[1], $fsp) ||
@@ -737,15 +758,45 @@ class OltService
             [$customerId, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
             $data = compact('frame', 'slot', 'port') + ['olt' => $found[0], 'ontId' => $ontId[1], 'sn' => $serial, 'state' => $state[1], 'customerId' => trim($customerId), 'customerName' => trim($customerName), 'descriptionTarget' => trim($customerId)];
 
-            return $this->details($data);
+            return $this->details($data, $found[1]);
         } finally {
             $this->close($found[0]);
         }
     }
 
+    private function readOntInfo(string $olt, string $f, string $s, string $p, string $id): ?array
+    {
+        $info = $this->command($olt, "display ont info {$f} {$s} {$p} {$id}") ?? '';
+
+        if (
+            !preg_match('/Run\s*state\s*:\s*([A-Za-z0-9_-]+)/i', $info, $state) ||
+            !preg_match('/\bSN\s*:\s*([A-Z0-9]{16})/i', $info, $sn)
+        ) {
+            return null;
+        }
+
+        $description = preg_match('/Description\s*:\s*([^\r\n]+)/i', $info, $d)
+            ? trim($d[1])
+            : '-';
+
+        return [
+            'olt' => $olt,
+            'frame' => $f,
+            'slot' => $s,
+            'port' => $p,
+            'ontId' => $id,
+            'sn' => strtoupper($sn[1]),
+            'state' => $state[1],
+            'description' => $description,
+            'info' => $info,
+        ];
+    }
     private function details(array $data): array
     {
-        $info = $this->command($data['olt'], "display ont info {$data['frame']} {$data['slot']} {$data['port']} {$data['ontId']}") ?? '';
+        $info ??= $this->command(
+            $data['olt'],
+            "display ont info {$data['frame']} {$data['slot']} {$data['port']} {$data['ontId']}"
+        ) ?? '';
         $infoValue = function (string $pattern, string $default = '-') use ($info): string {
             return preg_match($pattern, $info, $m) ? trim($m[1]) : $default;
         };
@@ -762,7 +813,7 @@ class OltService
         };
 
         return array_merge($data, [
-            'runState' => $data['state'], 
+            'runState' => $data['state'],
             'controlFlag' => strtolower(
                 $infoValue('/Control\s*flag\s*:\s*([^\r\n]+)/i')
             ),
@@ -883,82 +934,73 @@ class OltService
         return 'OLT menolak command version: ' . $message;
     }
 
-    public function apiVersion(string $id): ?array
+    public function apiVersion(string $id, bool $includeVersion = true): ?array
     {
         $id = trim($id);
-        $found = $this->search("display ont info by-desc {$id}")
-            ?? $this->search('display ont info by-desc "' . $id . '"');
-        if (!$found || !preg_match('/(\d+\s*\/\s*\d+\s*\/\s*\d+)\s+(\d+)\s+([A-Z0-9]{12,20})\s+(\S+)\s+(\S+)/i', $found[1], $m)) {
-            Log::warning('ONT lookup response did not match expected format', [
-                'olt' => $found[0] ?? null,
-                'customer_id' => $id
-            ]);
-            $this->debug('ssh.ont_lookup.unparseable_response', [
-                'olt' => $found[0] ?? null,
-                'customer_id' => $id,
-                'response' => $found[1] ?? null,
-            ]);
+        $loc = $this->locateByDescription($id);
 
-            if ($found) {
-                $this->close($found[0]);
-            }
+        if (!$loc) {
+            $this->debug('ssh.ont_lookup.not_found', ['customer_id' => $id]);
 
             return null;
         }
 
-        try {
-            [$frame, $slot, $port] = explode('/', preg_replace('/\s+/', '', $m[1]));
-            $state = $m[5];
-            if (preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $stateMatch)) {
-                $state = $stateMatch[1];
-            }
+        $oltName = $loc['olt'];
 
-            $description = $this->extractDescription($found[1], $id);
-            [, $customerName] = array_pad(explode('-', $description, 2), 2, '-');
+        try {
+            $frame = $loc['frame'];
+            $slot = $loc['slot'];
+            $port = $loc['port'];
+            $ontId = $loc['ontId'];
+            $state = $loc['state'];
+
+            [, $customerName] = array_pad(explode('-', $loc['description'], 2), 2, '-');
             $customerName = trim($customerName) ?: '-';
 
-            $stateLower = strtolower($state);
             $raw = '';
             $versionReason = null;
 
-            if ($stateLower === 'online') {
-                $raw = $this->command($found[0], "display ont version {$frame} {$slot} {$port} {$m[2]}") ?? '';
+            if (strtolower($state) !== 'online') {
+                $versionReason = $this->ontOfflineReason($state);
+            } elseif ($includeVersion) {
+                $raw = $this->command($oltName, "display ont version {$frame} {$slot} {$port} {$ontId}") ?? '';
+
                 if (preg_match('/Failure\s*:\s*([^\r\n]+)/i', $raw, $failure)) {
                     $versionReason = $this->versionFailureReason(trim($failure[1]), $state);
                 }
             } else {
-                $versionReason = $this->ontOfflineReason($state);
+                $versionReason = 'Pembacaan versi ONT dilewati.';
             }
 
             $details = $this->details([
-                'olt' => $found[0],
+                'olt' => $oltName,
                 'frame' => $frame,
                 'slot' => $slot,
                 'port' => $port,
-                'ontId' => $m[2],
-                'sn' => $m[3],
+                'ontId' => $ontId,
+                'sn' => $loc['sn'],
                 'state' => $state,
                 'customerId' => $id,
                 'customerName' => $customerName,
                 'descriptionTarget' => $id,
-            ]);
+            ], $loc['info']);
 
             $equipment = ($versionReason === null && preg_match('/Equipment-ID\s*:\s*([^\r\n]+)/i', $raw, $e))
                 ? trim($e[1])
                 : '-';
 
             $result = array_merge($details, [
-                'olt' => $found[0],
+                'olt' => $oltName,
                 'idcust' => $id,
                 'customerId' => $id,
                 'customerName' => $customerName,
                 'runState' => $state,
                 'state' => $state,
-                'sn' => $m[3],
+                'sn' => $loc['sn'],
                 'frame' => $frame,
                 'slot' => $slot,
                 'port' => $port,
-                'ontId' => $m[2],
+                'ontId' => $ontId,
                 'brand' => 'Unknown',
                 'type' => $equipment,
                 'wlanType' => 'Unknown',
@@ -967,17 +1009,16 @@ class OltService
             ]);
 
             $this->debug('ssh.ont_version.result', [
-                'olt' => $found[0],
+                'olt' => $oltName,
                 'customer_id' => $id,
                 'result' => $result,
             ]);
 
             return $result;
         } finally {
-            $this->close($found[0]);
+            $this->close($oltName);
         }
     }
-
 
 
 
@@ -1752,6 +1793,97 @@ class OltService
         } finally {
             $this->close($olt);
         }
+    }
+
+    private function locateByDescription(string $id): ?array
+    {
+        $key = 'olt:ont-loc:' . md5(strtolower($id));
+
+        if ($hint = Cache::get($key)) {
+            try {
+                $loc = $this->readOntInfo(
+                    $hint['olt'], $hint['frame'], $hint['slot'], $hint['port'], $hint['ontId']
+                );
+
+                if ($loc && $this->descriptionMatches($loc['description'], $id)) {
+                    $this->debug('ssh.ont_lookup.cache_hit', ['customer_id' => $id, 'olt' => $loc['olt']]);
+
+                    return $loc;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Cache lokasi ONT gagal divalidasi', [
+                    'customer_id' => $id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            // ONT sudah pindah / dihapus / re-provisioning.
+            Cache::forget($key);
+            if (isset($hint['olt'])) {
+                $this->close($hint['olt']);
+            }
+        }
+
+        $found = $this->search("display ont info by-desc {$id}");
+
+        // Fallback dengan kutip hanya jika ID mengandung spasi/karakter khusus.
+        if (!$found && preg_match('/[\s"]/', $id)) {
+            $found = $this->search('display ont info by-desc "' . $id . '"');
+        }
+
+        if (
+            !$found ||
+            !preg_match(
+                '/(\d+\s*\/\s*\d+\s*\/\s*\d+)\s+(\d+)\s+([A-Z0-9]{12,20})\s+(\S+)\s+(\S+)/i',
+                $found[1],
+                $m
+            )
+        ) {
+            Log::warning('ONT lookup response did not match expected format', [
+                'olt' => $found[0] ?? null,
+                'customer_id' => $id,
+            ]);
+            $this->debug('ssh.ont_lookup.unparseable_response', [
+                'olt' => $found[0] ?? null,
+                'customer_id' => $id,
+                'response' => isset($found[1]) ? substr($found[1], 0, 1000) : null,
+            ]);
+
+            if ($found) {
+                $this->close($found[0]);
+            }
+
+            return null;
+        }
+
+        [$frame, $slot, $port] = explode('/', preg_replace('/\s+/', '', $m[1]));
+
+        $state = $m[5];
+        if (preg_match('/Run\s*state\s*:\s*([a-zA-Z0-9_-]+)/i', $found[1], $stateMatch)) {
+            $state = $stateMatch[1];
+        }
+
+        $loc = [
+            'olt' => $found[0],
+            'frame' => $frame,
+            'slot' => $slot,
+            'port' => $port,
+            'ontId' => $m[2],
+            'sn' => $m[3],
+            'state' => $state,
+            'description' => $this->extractDescription($found[1], $id),
+            'info' => null,
+        ];
+
+        Cache::put($key, [
+            'olt' => $loc['olt'],
+            'frame' => $frame,
+            'slot' => $slot,
+            'port' => $port,
+            'ontId' => $m[2],
+        ], now()->addDays(30));
+
+        return $loc;
     }
 
     private function field(string $raw, string $pattern, string $default = '-'): string
