@@ -44,6 +44,20 @@ return [
             'transaction_mode' => 'DEFERRED',
         ],
 
+        'billing' => [
+            'driver'    => 'mysql',
+            'host'      => env('BILLING_DB_HOST', '127.0.0.1'),
+            'port'      => env('BILLING_DB_PORT', '3306'),
+            'database'  => env('BILLING_DB_DATABASE'),
+            'username'  => env('BILLING_DB_USERNAME'),
+            'password'  => env('BILLING_DB_PASSWORD'),
+            'charset'   => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix'    => '',
+            'strict'    => true,
+            'engine'    => null,
+        ],
+
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),

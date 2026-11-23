@@ -5,13 +5,16 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\OntController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\OltActivityController;
+use App\Http\Controllers\AccessControlController;
 
 // Root
 Route::get('/', fn () => redirect()->route('dashboard'));
 
 // Guest
 Route::middleware('guest')->group(function () {
-    Route::get('/login', [DashboardController::class, 'login'])->name('login');
+    Route::get('/login', [DashboardController::class, 'login'])
+        ->name('login');
+
     Route::post('/login', [DashboardController::class, 'authenticate'])
         ->name('login.authenticate');
 });
@@ -19,103 +22,225 @@ Route::middleware('guest')->group(function () {
 // Authenticated
 Route::middleware('auth')->group(function () {
 
+    // Logout
     Route::post('/logout', [DashboardController::class, 'logout'])
         ->name('logout');
 
+    // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index'])
+        ->middleware('permission:dashboard.view')
         ->name('dashboard');
 
+    // ONT Lookup Page
     Route::get('/dashboard/ont', [DashboardController::class, 'ontLookup'])
+        ->middleware('permission:ont.lookup')
         ->name('dashboard.ont');
 
-    // ONT PROCESSING
-    Route::prefix('portal/ont')->name('portal.ont.')->group(function () {
 
-        Route::get('/processing/{uuid}', [OntController::class, 'processing'])
-            ->name('processing');
+    /*
+    |--------------------------------------------------------------------------
+    | ONT PROCESSING
+    |--------------------------------------------------------------------------
+    */
 
-        Route::get('/request-status/{uuid}', [OntController::class, 'requestStatus'])
-            ->name('request-status');
+    Route::prefix('portal/ont')
+        ->name('portal.ont.')
+        ->middleware('permission:ont.processing')
+        ->group(function () {
 
-        Route::get('/result/{uuid}', [OntController::class, 'result'])
-            ->name('result');
-    });
+            Route::get('/processing/{uuid}', [OntController::class, 'processing'])
+                ->name('processing');
 
-    // ONT API
-    Route::prefix('api/v1/ont')->name('api.ont.')->group(function () {
-        Route::post('/control', [OntController::class, 'control'])
-            ->name('control');
+            Route::get('/request-status/{uuid}', [OntController::class, 'requestStatus'])
+                ->name('request-status');
 
-        Route::get('/lookup', [OntController::class, 'lookup'])
-            ->name('lookup');
+            Route::get('/result/{uuid}', [OntController::class, 'result'])
+                ->name('result');
+        });
 
-        Route::get('/check-desc', [OntController::class, 'checkDescription'])
-            ->name('check-desc');
 
-        Route::get('/version', [OntController::class, 'version'])
-            ->name('version');
-    });
+    /*
+    |--------------------------------------------------------------------------
+    | ONT API
+    |--------------------------------------------------------------------------
+    */
 
-    // ADMIN ONLY
-    Route::middleware('admin')->group(function () {
+    Route::prefix('api/v1/ont')
+        ->name('api.ont.')
+        ->group(function () {
 
-        // OLT Activity Monitoring
-        Route::get('/dashboard/olt-activity', [OltActivityController::class, 'index'])
-            ->name('olt-activity');
+            Route::post('/control', [OntController::class, 'control'])
+                ->middleware('permission:ont.control')
+                ->name('control');
 
-        // Route::get('/dashboard/olt-activity/data', [OltActivityController::class, 'data'])
-        //     ->name('olt-activity.data');
+            Route::get('/lookup', [OntController::class, 'lookup'])
+                ->middleware('permission:ont.lookup')
+                ->name('lookup');
 
-        // OLT
-        Route::get('/dashboard/olts', [DashboardController::class, 'olts'])
-            ->name('olts');
+            Route::get('/check-desc', [OntController::class, 'checkDescription'])
+                ->middleware('permission:ont.lookup')
+                ->name('check-desc');
 
-        Route::get('/dashboard/olts/ports', [DashboardController::class, 'oltPorts'])
-            ->name('olts.ports');
+            Route::get('/version', [OntController::class, 'version'])
+                ->middleware('permission:ont.lookup')
+                ->name('version');
+        });
 
-        Route::post('/dashboard/olts', [DashboardController::class, 'storeOlt'])
-            ->name('olts.store');
 
-        Route::put('/dashboard/olts/{olt}', [DashboardController::class, 'updateOlt'])
-            ->name('olts.update');
+    /*
+    |--------------------------------------------------------------------------
+    | OLT ACTIVITY
+    |--------------------------------------------------------------------------
+    */
 
-        Route::delete('/dashboard/olts/{olt}', [DashboardController::class, 'destroyOlt'])
-            ->name('olts.destroy');
+    Route::get('/dashboard/olt-activity', [OltActivityController::class, 'index'])
+        ->middleware('permission:olt.activity.view')
+        ->name('olt-activity');
 
-        Route::post('/dashboard/olts/{olt}/test', [DashboardController::class, 'testOlt'])
-            ->name('olts.test');
 
-        Route::post('/dashboard/olts/test-all', [DashboardController::class, 'testAllOlts'])
-            ->name('olts.test-all');
+    /*
+    |--------------------------------------------------------------------------
+    | OLT MANAGEMENT
+    |--------------------------------------------------------------------------
+    */
 
-        // Telegram
-        Route::get('/dashboard/whitelist', [DashboardController::class, 'whitelist'])
-            ->name('whitelist');
+    Route::prefix('dashboard/olts')
+        ->name('olts.')
+        ->group(function () {
 
-        Route::post('/dashboard/whitelist', [DashboardController::class, 'storeWhitelist'])
-            ->name('whitelist.store');
+            Route::get('/', [DashboardController::class, 'olts'])
+                ->middleware('permission:olt.view')
+                ->name('index');
 
-        Route::put('/dashboard/whitelist/{entry}', [DashboardController::class, 'updateWhitelist'])
-            ->name('whitelist.update');
+            Route::get('/ports', [DashboardController::class, 'oltPorts'])
+                ->middleware('permission:olt.view')
+                ->name('ports');
 
-        Route::delete('/dashboard/whitelist/{entry}', [DashboardController::class, 'destroyWhitelist'])
-            ->name('whitelist.destroy');
+            Route::post('/', [DashboardController::class, 'storeOlt'])
+                ->middleware('permission:olt.create')
+                ->name('store');
 
-        // Users
-        Route::get('/dashboard/users', [DashboardController::class, 'users'])
-            ->name('users');
+            Route::put('/{olt}', [DashboardController::class, 'updateOlt'])
+                ->middleware('permission:olt.update')
+                ->name('update');
 
-        Route::post('/dashboard/users', [DashboardController::class, 'storeUser'])
-            ->name('users.store');
+            Route::delete('/{olt}', [DashboardController::class, 'destroyOlt'])
+                ->middleware('permission:olt.delete')
+                ->name('destroy');
 
-        Route::put('/dashboard/users/{user}', [DashboardController::class, 'updateUser'])
-            ->name('users.update');
+            Route::post('/{olt}/test', [DashboardController::class, 'testOlt'])
+                ->middleware('permission:olt.test')
+                ->name('test');
 
-        Route::delete('/dashboard/users/{user}', [DashboardController::class, 'destroyUser'])
-            ->name('users.destroy');
+            Route::post('/test-all', [DashboardController::class, 'testAllOlts'])
+                ->middleware('permission:olt.test')
+                ->name('test-all');
+        });
 
-        // Audit logs
-        Route::get('/dashboard/audit-logs', [DashboardController::class, 'auditLogs'])
-            ->name('audit-logs');
-    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | TELEGRAM WHITELIST
+    |--------------------------------------------------------------------------
+    */
+
+    Route::prefix('dashboard/whitelist')
+        ->name('whitelist.')
+        ->group(function () {
+
+            Route::get('/', [DashboardController::class, 'whitelist'])
+                ->middleware('permission:telegram.view')
+                ->name('index');
+
+            Route::post('/', [DashboardController::class, 'storeWhitelist'])
+                ->middleware('permission:telegram.manage')
+                ->name('store');
+
+            Route::put('/{entry}', [DashboardController::class, 'updateWhitelist'])
+                ->middleware('permission:telegram.manage')
+                ->name('update');
+
+            Route::delete('/{entry}', [DashboardController::class, 'destroyWhitelist'])
+                ->middleware('permission:telegram.manage')
+                ->name('destroy');
+        });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | USER MANAGEMENT
+    |--------------------------------------------------------------------------
+    */
+
+    Route::prefix('dashboard/users')
+        ->name('users.')
+        ->group(function () {
+
+            Route::get('/', [DashboardController::class, 'users'])
+                ->middleware('permission:users.view')
+                ->name('index');
+
+            Route::post('/', [DashboardController::class, 'storeUser'])
+                ->middleware('permission:users.create')
+                ->name('store');
+
+            Route::put('/{user}', [DashboardController::class, 'updateUser'])
+                ->middleware('permission:users.update')
+                ->name('update');
+
+            Route::delete('/{user}', [DashboardController::class, 'destroyUser'])
+                ->middleware('permission:users.delete')
+                ->name('destroy');
+        });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | AUDIT LOGS
+    |--------------------------------------------------------------------------
+    */
+
+    Route::get('/dashboard/audit-logs', [DashboardController::class, 'auditLogs'])
+        ->middleware('permission:audit.view')
+        ->name('audit-logs');
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | ACCESS CONTROL
+    |--------------------------------------------------------------------------
+    */
+
+    Route::prefix('dashboard/access')
+        ->name('access.')
+        ->group(function () {
+
+            Route::get('/', [AccessControlController::class, 'index'])
+                ->middleware('permission:access.view')
+                ->name('index');
+
+            // Role management
+            Route::post('/roles', [AccessControlController::class, 'storeRole'])
+                ->middleware('permission:access.manage')
+                ->name('roles.store');
+
+            Route::put('/roles/{role}', [AccessControlController::class, 'updateRole'])
+                ->middleware('permission:access.manage')
+                ->name('roles.update');
+
+            Route::delete('/roles/{role}', [AccessControlController::class, 'destroyRole'])
+                ->middleware('permission:access.manage')
+                ->name('roles.destroy');
+
+            // Role permissions
+            Route::put('/roles/{role}/permissions', [AccessControlController::class, 'updatePermissions'])
+                ->middleware('permission:access.manage')
+                ->name('roles.permissions');
+
+            // User roles
+            Route::put('/users/{user}/roles', [AccessControlController::class, 'updateUserRoles'])
+                ->middleware('permission:access.manage')
+                ->name('users.roles');
+        });
+
 });

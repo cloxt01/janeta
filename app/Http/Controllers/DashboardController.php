@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Role;
+use App\Models\RoleUser;
 use App\Models\User;
 use App\Models\WhitelistEntry;
 use App\Models\Olt;
@@ -304,33 +306,43 @@ class DashboardController extends Controller
     public function storeUser(Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'max:255', 'unique:users,email'],
-            'password' => ['required', 'string', 'min:8'],
-            'is_admin' => ['boolean'],
-            'hris_role' => ['required', Rule::in(['super_admin', 'admin', 'operator', 'viewer'])],
+            'name'      => ['required', 'string', 'max:255'],
+            'email'     => ['required', 'email', 'max:255', 'unique:users,email'],
+            'password'  => ['required', 'string', 'min:8'],
+            'hris_role' => ['nullable', Rule::in(['super_admin', 'admin', 'operator', 'viewer'])],
         ]);
-        $data['is_admin'] = $request->boolean('is_admin');
-        $data['role'] = $data['hris_role'];
-        User::create($data);
+
+        $hrisRole = $data['hris_role'] ?? 'operator';
+        $roleName = str_replace('_', '-', $hrisRole);
+
+        $user = User::create([
+            'name'     => $data['name'],
+            'email'    => $data['email'],
+            'password' => $data['password'],
+            'role'     => $hrisRole,
+        ]);
+
+        $roleId = Role::where('name', $roleName)->value('id');
+
+        if ($roleId) {
+            $user->roles()->sync([$roleId]);
+        }
+
         $this->audit($request, 'user.created', 'Pengguna dashboard ditambahkan.');
 
         return back()->with('success', 'Pengguna dashboard berhasil ditambahkan.');
     }
-
     public function updateUser(Request $request, User $user): RedirectResponse
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email,'.$user->id],
             'password' => ['nullable', 'string', 'min:8'],
-            'is_admin' => ['boolean'],
             'hris_role' => ['required', Rule::in(['super_admin', 'admin', 'operator', 'viewer'])],
         ]);
         if (! array_key_exists('password', $data) || $data['password'] === null || $data['password'] === '') {
             unset($data['password']);
         }
-        $data['is_admin'] = $request->boolean('is_admin');
         $data['role'] = $data['hris_role'];
         $user->update($data);
         $this->audit($request, 'user.updated', 'Pengguna dashboard diperbarui.', $user);

@@ -14,6 +14,9 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->call([
+            AccessControlSeeder::class,
+        ]);
         \App\Models\User::updateOrCreate(
             ['email' => env('DASHBOARD_ADMIN_EMAIL', 'admin@jangkaunet.com')],
             [

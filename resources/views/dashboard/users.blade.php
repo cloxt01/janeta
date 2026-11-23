@@ -3,7 +3,7 @@
     @php
         $totalUsers = $users->total();
         $pageUsers = $users->count();
-        $adminUsers = $users->getCollection()->where('is_admin', true)->count();
+//        $adminUsers = $users->getCollection()->where('is_admin', true)->count();
 
         $roleLabels = [
             'super_admin' => 'Super Admin',
@@ -275,25 +275,25 @@
             </div>
 
             {{-- ADMINISTRATORS --}}
-            <div class="usr-stat">
-                <div class="flex items-center justify-between">
-                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                        Administrators
-                    </p>
+{{--            <div class="usr-stat">--}}
+{{--                <div class="flex items-center justify-between">--}}
+{{--                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">--}}
+{{--                        Administrators--}}
+{{--                    </p>--}}
 
-                    <span class="rounded-lg bg-amber-50 p-2 text-amber-600">
-                        <i data-lucide="shield-check" class="h-5 w-5"></i>
-                    </span>
-                </div>
+{{--                    <span class="rounded-lg bg-amber-50 p-2 text-amber-600">--}}
+{{--                        <i data-lucide="shield-check" class="h-5 w-5"></i>--}}
+{{--                    </span>--}}
+{{--                </div>--}}
 
-                <div class="mt-2 text-2xl font-semibold text-slate-900">
-                    {{ $adminUsers }}
-                </div>
+{{--                <div class="mt-2 text-2xl font-semibold text-slate-900">--}}
+{{--                    {{ $adminUsers }}--}}
+{{--                </div>--}}
 
-                <p class="mt-1 text-xs text-slate-400">
-                    Admin pada halaman ini
-                </p>
-            </div>
+{{--                <p class="mt-1 text-xs text-slate-400">--}}
+{{--                    Admin pada halaman ini--}}
+{{--                </p>--}}
+{{--            </div>--}}
 
             {{-- DISPLAYED --}}
             <div class="usr-stat">
@@ -432,19 +432,19 @@
                     </select>
                 </div>
 
-                <div class="flex items-end md:col-span-1">
-                    <label class="flex min-h-[36px] cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600">
-                        <input
-                            type="checkbox"
-                            name="is_admin"
-                            value="1"
-                            @checked(old('is_admin'))
-                            class="h-4 w-4 rounded accent-slate-700"
-                        >
+{{--                <div class="flex items-end md:col-span-1">--}}
+{{--                    <label class="flex min-h-[36px] cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600">--}}
+{{--                        <input--}}
+{{--                            type="checkbox"--}}
+{{--                            name="is_admin"--}}
+{{--                            value="1"--}}
+{{--                            @checked(old('is_admin'))--}}
+{{--                            class="h-4 w-4 rounded accent-slate-700"--}}
+{{--                        >--}}
 
-                        Admin
-                    </label>
-                </div>
+{{--                        Admin--}}
+{{--                    </label>--}}
+{{--                </div>--}}
 
                 <div class="flex items-end md:col-span-1">
                     <button type="submit" class="jn-button w-full">
@@ -543,18 +543,18 @@
                                         @endforeach
                                     </select>
 
-                                    <label class="mt-3 flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600">
-                                        <input
-                                            form="update-user-{{ $user->id }}"
-                                            type="checkbox"
-                                            name="is_admin"
-                                            value="1"
-                                            @checked($user->is_admin)
-                                            class="h-4 w-4 rounded accent-slate-700"
-                                        >
+{{--                                    <label class="mt-3 flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600">--}}
+{{--                                        <input--}}
+{{--                                            form="update-user-{{ $user->id }}"--}}
+{{--                                            type="checkbox"--}}
+{{--                                            name="is_admin"--}}
+{{--                                            value="1"--}}
+{{--                                            @checked($user->is_admin)--}}
+{{--                                            class="h-4 w-4 rounded accent-slate-700"--}}
+{{--                                        >--}}
 
-                                        Akses administrator
-                                    </label>
+{{--                                        Akses administrator--}}
+{{--                                    </label>--}}
 
                                 </td>
 
