@@ -34,26 +34,15 @@ class TelegramClient
                 if ($i === $attempts) {
                     throw new RuntimeException("Telegram {$method} gagal (koneksi): " . $e->getMessage(), 0, $e);
                 }
-
-                Log::warning("Telegram {$method} koneksi timeout/gagal (percobaan {$i}/{$attempts}), mencoba ulang...", [
-                    'error' => $e->getMessage()
-                ]);
-
-                // Perbaikan syntax usleep dengan perkalian waktu tunggu
+                Log::warning("Telegram {$method} koneksi timeout/gagal (percobaan {$i}/{$attempts}), mencoba ulang...", ['error' => $e->getMessage()]);
                 usleep(500_000 * $i);
                 continue;
             }
 
             if ($response->serverError() || $response->status() === 429) {
                 if ($i < $attempts) {
-                    $wait = $response->status() === 429
-                        ? (int) $response->json('parameters.retry_after', 1)
-                        : $i;
-                    
-                    Log::warning("Telegram {$method} merespons status {$response->status()}, menunggu {$wait} detik...", [
-                        'attempt' => $i
-                    ]);
-
+                    $wait = $response->status() === 429 ? (int) $response->json('parameters.retry_after', 1) : $i;
+                    Log::warning("Telegram {$method} merespons status {$response->status()}, menunggu {$wait} detik...", ['attempt' => $i]);
                     sleep(max(1, $wait));
                     continue;
                 }
@@ -74,8 +63,6 @@ class TelegramClient
         throw new RuntimeException("Telegram {$method} gagal setelah {$attempts} percobaan.");
     }
 
-
-
     public function sendMessage(
         string|int $chatId,
         string $text,
@@ -89,68 +76,60 @@ class TelegramClient
         ];
 
         if ($keyboard !== null && !empty($keyboard)) {
-
-            // Kompatibilitas dengan format array tombol datar.
-            // Jika elemen pertama memiliki key "text",
-            // berarti keyboard belum dibungkus menjadi baris.
-            if (
-                isset($keyboard[0]['text']) &&
-                !isset($keyboard[0][0])
-            ) {
+            if (isset($keyboard[0]['text']) && !isset($keyboard[0][0])) {
                 $keyboard = [$keyboard];
             }
-
-            // Validasi struktur inline keyboard.
             foreach ($keyboard as $row) {
-                if (!is_array($row)) {
-                    throw new RuntimeException(
-                        'Format inline keyboard tidak valid: baris harus berupa array.'
-                    );
-                }
-
+                if (!is_array($row)) throw new RuntimeException('Format inline keyboard tidak valid: baris harus berupa array.');
                 foreach ($row as $button) {
-                    if (
-                        !is_array($button) ||
-                        empty($button['text']) ||
-                        (
-                            empty($button['callback_data']) &&
-                            empty($button['url']) &&
-                            empty($button['web_app'])
-                        )
-                    ) {
-                        throw new RuntimeException(
-                            'Format InlineKeyboardButton tidak valid.'
-                        );
+                    if (!is_array($button) || empty($button['text']) || (empty($button['callback_data']) && empty($button['url']) && empty($button['web_app']))) {
+                        throw new RuntimeException('Format InlineKeyboardButton tidak valid.');
                     }
                 }
             }
-
-            $params['reply_markup'] = [
-                'inline_keyboard' => $keyboard,
-            ];
+            $params['reply_markup'] = ['inline_keyboard' => $keyboard];
         }
 
         return $this->call('sendMessage', $params);
     }
 
+    // ✅ FITUR BARU: Untuk mengubah pesan "Memproses..." menjadi hasil akhir
+    public function editMessageText(string|int $chatId, int $messageId, string $text, ?array $keyboard = null, string $parseMode = 'Markdown'): array|bool
+    {
+        $params = [
+            'chat_id' => $chatId, 
+            'message_id' => $messageId, 
+            'text' => $text, 
+            'parse_mode' => $parseMode
+        ];
+        
+        if ($keyboard !== null) {
+            if (isset($keyboard[0]['text']) && !isset($keyboard[0][0])) $keyboard = [$keyboard];
+            $params['reply_markup'] = ['inline_keyboard' => $keyboard];
+        } else {
+            $params['reply_markup'] = ['inline_keyboard' => []];
+        }
+        
+        return $this->call('editMessageText', $params);
+    }
 
-
-
+    // ✅ FITUR BARU: Untuk memunculkan status "typing..."
+    public function sendChatAction(string|int $chatId, string $action = 'typing'): void
+    {
+        try {
+            $this->call('sendChatAction', ['chat_id' => $chatId, 'action' => $action]);
+        } catch (\Throwable $e) {}
+    }
 
     public function answerCallback(string $id, string $text = '', bool $alert = false): void
     {
         try {
             $this->call('answerCallbackQuery', ['callback_query_id' => $id, 'text' => $text, 'show_alert' => $alert]);
         } catch (RuntimeException $exception) {
-            if (! str_contains($exception->getMessage(), 'query is too old') &&
-                ! str_contains($exception->getMessage(), 'query ID is invalid')) {
+            if (! str_contains($exception->getMessage(), 'query is too old') && ! str_contains($exception->getMessage(), 'query ID is invalid')) {
                 throw $exception;
             }
-
-            Log::warning('Telegram callback sudah kedaluwarsa atau tidak valid.', [
-                'callback_query_id' => $id,
-                'error' => $exception->getMessage(),
-            ]);
+            Log::warning('Telegram callback sudah kedaluwarsa atau tidak valid.', ['callback_query_id' => $id, 'error' => $exception->getMessage()]);
         }
     }
 
@@ -167,7 +146,6 @@ class TelegramClient
     public function getUpdates(int $offset = 0): array
     {
         $poll = (int) config('janeta.telegram.polling_timeout', 30);
-
         $result = $this->call('getUpdates', [
             'offset' => $offset,
             'timeout' => $poll,
