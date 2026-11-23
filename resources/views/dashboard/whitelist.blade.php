@@ -4,7 +4,7 @@
         $totalEntries = $entries->total();
         $pageEntries = $entries->count();
         $adminEntries = $entries->getCollection()
-            ->where('is_admin', true)
+            ->filter(fn ($e) => $e->isAdmin())
             ->count();
     @endphp
 
@@ -82,7 +82,9 @@
         }
 
         .wl-add-form input:not([type="checkbox"]),
-        .wl-table input:not([type="checkbox"]) {
+        .wl-add-form select,
+        .wl-table input:not([type="checkbox"]),
+        .wl-table select {
             width: 100%;
             border: 1px solid #cbd5e1;
             border-radius: 7px;
@@ -95,7 +97,9 @@
         }
 
         .wl-add-form input:focus,
-        .wl-table input:focus {
+        .wl-add-form select:focus,
+        .wl-table input:focus,
+        .wl-table select:focus {
             border-color: #64748b;
             box-shadow: 0 0 0 3px rgb(100 116 139 / 11%);
         }
@@ -354,18 +358,13 @@
                     >
                 </div>
 
-                <div class="flex items-end md:col-span-2">
-                    <label class="flex min-h-[36px] w-full cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600">
-                        <input
-                            type="checkbox"
-                            name="is_admin"
-                            value="1"
-                            @checked(old('is_admin'))
-                            class="h-4 w-4 rounded accent-slate-700"
-                        >
+                <div class="wl-field md:col-span-2">
+                    <label>Hak Akses</label>
 
-                        <span>Admin Telegram</span>
-                    </label>
+                    <select name="role" required>
+                        <option value="user" @selected(old('role', 'user') === 'user')>User</option>
+                        <option value="admin" @selected(old('role') === 'admin')>Admin</option>
+                    </select>
                 </div>
 
                 <div class="flex items-end md:col-span-2">
@@ -401,136 +400,128 @@
                 <table class="wl-table w-full text-left">
 
                     <thead>
-                        <tr>
-                            <th>Chat ID</th>
-                            <th>Nama / Grup</th>
-                            <th>Hak Akses</th>
-                            <th class="text-right">Aksi</th>
-                        </tr>
+                    <tr>
+                        <th>Chat ID</th>
+                        <th>Nama / Grup</th>
+                        <th>Hak Akses</th>
+                        <th class="text-right">Aksi</th>
+                    </tr>
                     </thead>
 
                     <tbody>
 
-                        @forelse($entries as $entry)
+                    @forelse($entries as $entry)
 
-                            <tr class="transition-colors hover:bg-slate-50/70">
+                        <tr class="transition-colors hover:bg-slate-50/70">
 
-                                {{-- CHAT ID --}}
-                                <td class="w-1/3">
-                                    <input
-                                        form="update-{{ $entry->id }}"
-                                        type="text"
-                                        name="chat_id"
-                                        value="{{ $entry->chat_id }}"
-                                        required
-                                        class="font-mono"
-                                    >
-                                </td>
+                            {{-- CHAT ID --}}
+                            <td class="w-1/3">
+                                <input
+                                    form="update-{{ $entry->id }}"
+                                    type="text"
+                                    name="chat_id"
+                                    value="{{ $entry->chat_id }}"
+                                    required
+                                    class="font-mono"
+                                >
+                            </td>
 
-                                {{-- NAME --}}
-                                <td class="w-1/3">
-                                    <input
-                                        form="update-{{ $entry->id }}"
-                                        type="text"
-                                        name="name"
-                                        value="{{ $entry->name }}"
-                                        placeholder="Belum ada nama"
-                                    >
-                                </td>
+                            {{-- NAME --}}
+                            <td class="w-1/3">
+                                <input
+                                    form="update-{{ $entry->id }}"
+                                    type="text"
+                                    name="name"
+                                    value="{{ $entry->name }}"
+                                    placeholder="Belum ada nama"
+                                >
+                            </td>
 
-                                {{-- ROLE --}}
-                                <td>
-                                    <div class="flex flex-col items-start gap-2">
+                            {{-- ROLE --}}
+                            <td>
+                                <div class="flex flex-col items-start gap-2">
 
-                                        <span class="wl-badge {{ $entry->is_admin ? 'wl-badge-admin' : 'wl-badge-user' }}">
-                                            <i data-lucide="{{ $entry->is_admin ? 'shield-check' : 'user' }}" class="h-3 w-3"></i>
+                                        <span class="wl-badge {{ $entry->isAdmin() ? 'wl-badge-admin' : 'wl-badge-user' }}">
+                                            <i data-lucide="{{ $entry->isAdmin() ? 'shield-check' : 'user' }}" class="h-3 w-3"></i>
 
-                                            {{ $entry->is_admin ? 'Admin' : 'User' }}
+                                            {{ $entry->isAdmin() ? 'Admin' : 'User' }}
                                         </span>
 
-                                        <label class="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-500">
-                                            <input
-                                                form="update-{{ $entry->id }}"
-                                                type="checkbox"
-                                                name="is_admin"
-                                                value="1"
-                                                @checked($entry->is_admin)
-                                                class="h-4 w-4 rounded accent-slate-700"
-                                            >
+                                    <select form="update-{{ $entry->id }}" name="role">
+                                        <option value="user" @selected(! $entry->isAdmin())>User</option>
+                                        <option value="admin" @selected($entry->isAdmin())>Admin</option>
+                                    </select>
 
-                                            <span>Administrator</span>
-                                        </label>
+                                </div>
+                            </td>
 
-                                    </div>
-                                </td>
+                            {{-- ACTIONS --}}
+                            <td>
+                                <div class="flex items-center justify-end gap-2">
 
-                                {{-- ACTIONS --}}
-                                <td>
-                                    <div class="flex items-center justify-end gap-2">
+                                    <form
+                                        id="update-{{ $entry->id }}"
+                                        method="POST"
+                                        action="{{ route('whitelist.update', $entry) }}"
+                                    >
+                                        @csrf
+                                        @method('PUT')
+                                    </form>
 
-                                        <form
-                                            id="update-{{ $entry->id }}"
-                                            method="POST"
-                                            action="{{ route('whitelist.update', $entry) }}"
-                                        >
-                                            @csrf
-                                            @method('PUT')
-                                        </form>
+                                    <button
+                                        type="submit"
+                                        form="update-{{ $entry->id }}"
+                                        class="wl-action wl-action-save"
+                                    >
+                                        <i data-lucide="save" class="h-3.5 w-3.5"></i>
+                                        Simpan
+                                    </button>
+
+                                    <form
+                                        method="POST"
+                                        action="{{ route('whitelist.destroy', $entry) }}"
+                                        onsubmit="return confirm('Yakin ingin menghapus whitelist ini?')"
+                                    >
+                                        @csrf
+                                        @method('DELETE')
 
                                         <button
                                             type="submit"
-                                            form="update-{{ $entry->id }}"
-                                            class="wl-action wl-action-save"
+                                            class="wl-action wl-action-delete"
                                         >
-                                            <i data-lucide="save" class="h-3.5 w-3.5"></i>
-                                            Simpan
+                                            <i data-lucide="trash-2" class="h-3.5 w-3.5"></i>
+                                            Hapus
                                         </button>
+                                    </form>
 
-                                        <form
-                                            method="POST"
-                                            action="{{ route('whitelist.destroy', $entry) }}"
-                                            onsubmit="return confirm('Yakin ingin menghapus whitelist ini?')"
-                                        >
-                                            @csrf
-                                            @method('DELETE')
+                                </div>
+                            </td>
 
-                                            <button
-                                                type="submit"
-                                                class="wl-action wl-action-delete"
-                                            >
-                                                <i data-lucide="trash-2" class="h-3.5 w-3.5"></i>
-                                                Hapus
-                                            </button>
-                                        </form>
+                        </tr>
 
-                                    </div>
-                                </td>
+                    @empty
 
-                            </tr>
-
-                        @empty
-
-                            <tr>
-                                <td colspan="4" class="wl-empty">
-                                    <div class="flex flex-col items-center justify-center gap-3">
+                        <tr>
+                            <td colspan="4" class="wl-empty">
+                                <div class="flex flex-col items-center justify-center gap-3">
                                         <span class="rounded-xl bg-slate-100 p-4 text-slate-400">
                                             <i data-lucide="inbox" class="h-7 w-7"></i>
                                         </span>
 
-                                        <div>
-                                            <p class="text-sm font-semibold text-slate-700">
-                                                Belum ada whitelist
-                                            </p>
+                                    <div>
+                                        <p class="text-sm font-semibold text-slate-700">
+                                            Belum ada whitelist
+                                        </p>
 
-                                            <p class="mt-1 text-xs text-slate-400">
-                                                Tambahkan Chat ID Telegram untuk mulai mengelola akses bot.
-                                            </p>
-                                        </div>
+                                        <p class="mt-1 text-xs text-slate-400">
+                                            Tambahkan Chat ID Telegram untuk mulai mengelola akses bot.
+                                        </p>
                                     </div>
-                                </td>
-                            </tr>
+                                </div>
+                            </td>
+                        </tr>
 
-                        @endforelse
+                    @endforelse
 
                     </tbody>
 
