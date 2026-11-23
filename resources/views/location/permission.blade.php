@@ -482,14 +482,6 @@
 
     allowButton.addEventListener('click', () => {
 
-        if (!window.isSecureContext) {
-            showStatus(
-                'Akses lokasi membutuhkan HTTPS atau localhost.',
-                'error'
-            );
-            return;
-        }
-
         if (!navigator.geolocation) {
             showStatus(
                 'Browser tidak mendukung layanan lokasi.',
