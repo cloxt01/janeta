@@ -48,11 +48,11 @@ class JanetaBotService
         try {
             match ($command) {
                 '/start', '/help' => $this->send($chatId, $this->help($message['from']['first_name'] ?? 'Rekan')),
-                '/add' => $this->addUser($chatId, $args, $entry->is_admin),
-                '/delete' => $this->deleteUser($chatId, $args, $entry->is_admin),
+                '/add' => $this->addUser($chatId, $args, $entry->isAdmin()),
+                '/delete' => $this->deleteUser($chatId, $args, $entry->isAdmin()),
                 '/list' => $this->listUsers($chatId),
-                '/add_admin' => $this->addAdmin($chatId, $args, $entry->is_admin),
-                '/delete_admin' => $this->deleteAdmin($chatId, $args, $entry->is_admin),
+                '/add_admin' => $this->addAdmin($chatId, $args, $entry->isAdmin()),
+                '/delete_admin' => $this->deleteAdmin($chatId, $args, $entry->isAdmin()),
                 '/list_admin' => $this->listAdmins($chatId),
                 '/check' => $this->dispatchAsync($chatId, 'ont.version', ['id' => trim($args)], 'Memeriksa detail ONT...'),
                 '/checksn' => $this->dispatchAsync($chatId, 'ont.serial', ['sn' => strtoupper(trim($args))], 'Memeriksa ONT via Serial Number...'),
@@ -231,7 +231,7 @@ class JanetaBotService
 
     private function isAdmin(string $chatId): bool
     {
-        return WhitelistEntry::where('chat_id', $chatId)->where('is_admin', true)->exists();
+        return WhitelistEntry::where('chat_id', $chatId)->whereIn('role', WhitelistEntry::ADMIN_ROLES)->exists();
     }
 
     private function isWhitelisted(string $chatId): bool
@@ -258,7 +258,7 @@ class JanetaBotService
     {
         if (!$this->adminOnly($chatId, $admin)) return;
         $target = trim($args);
-        $user = WhitelistEntry::where('chat_id', $target)->where('is_admin', false)->first();
+        $user = WhitelistEntry::where('chat_id', $target)->whereNotIn('role', WhitelistEntry::ADMIN_ROLES)->first();
         if (!$user) { $this->send($chatId, '⚠️ User ID tidak ditemukan dalam whitelist.'); return; }
         $user->delete();
         $this->send($chatId, "🗑️ Berhasil menghapus akses untuk:\n👤 Nama: {$user->name}\n🔑 ID Chat: {$target}");
@@ -276,8 +276,9 @@ class JanetaBotService
         if (!$this->adminOnly($chatId, $admin)) return;
         $id = trim($args);
         if (!$id || !is_numeric($id)) { $this->send($chatId, '⚠️ Format salah. Contoh: `/add_admin 8601271578`'); return; }
-        $user = WhitelistEntry::updateOrCreate(['chat_id' => $id], ['is_admin' => true]);
-        if (!$user->wasRecentlyCreated && $user->is_admin) { $this->send($chatId, 'ℹ️ ID Chat tersebut sudah berstatus sebagai Admin.'); return; }
+        $existing = WhitelistEntry::where('chat_id', $id)->first();
+        if ($existing?->isAdmin()) { $this->send($chatId, 'ℹ️ ID Chat tersebut sudah berstatus sebagai Admin.'); return; }
+        WhitelistEntry::updateOrCreate(['chat_id' => $id], ['role' => 'admin']);
         $this->send($chatId, "👑 Berhasil menambahkan Administrator baru!\n🔑 ID Chat: `{$id}`");
     }
 
@@ -287,16 +288,16 @@ class JanetaBotService
         $id = trim($args);
         if (!$id) { $this->send($chatId, '⚠️ Format salah. Contoh: `/delete_admin 8601271578`'); return; }
         if ($id === $chatId) { $this->send($chatId, '❌ Anda tidak bisa menghapus status admin Anda sendiri demi keamanan.'); return; }
-        $user = WhitelistEntry::where('chat_id', $id)->where('is_admin', true)->first();
+        $user = WhitelistEntry::where('chat_id', $id)->whereIn('role', WhitelistEntry::ADMIN_ROLES)->first();
         if (!$user) { $this->send($chatId, '⚠️ ID Chat tersebut tidak ditemukan dalam daftar Admin.'); return; }
-        $user->update(['is_admin' => false]);
+        $user->update(['role' => 'user']);
         $this->send($chatId, "🗑️ Berhasil menghapus status Admin untuk ID Chat: `{$id}`");
     }
 
     private function listAdmins(string $chatId): void
     {
         $text = "👑 *DAFTAR ADMINISTRATOR NOC JANGKAUNET*\n\n";
-        $this->send($chatId, $text . WhitelistEntry::where('is_admin', true)->get()->values()->map(fn ($u, $i) => ($i + 1) . ". `{$u->chat_id}`\n")->implode(''));
+        $this->send($chatId, $text . WhitelistEntry::whereIn('role', WhitelistEntry::ADMIN_ROLES)->get()->values()->map(fn ($u, $i) => ($i + 1) . ". `{$u->chat_id}`\n")->implode(''));
     }
 
     private function help(string $name): string

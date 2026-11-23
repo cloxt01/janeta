@@ -10,7 +10,11 @@ class AdminMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
-        abort_unless($request->user()?->is_admin, 403);
+        abort_unless(
+            $request->user()?->isAdmin(),
+            403,
+            'Akses khusus Admin.'
+        );
 
         return $next($request);
     }

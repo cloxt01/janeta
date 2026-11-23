@@ -1,6 +1,8 @@
-
 <?php
 
+
+use App\Http\Controllers\LocationAdminController;
+use App\Http\Controllers\UserLocationController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\OntController;
 use App\Http\Controllers\DashboardController;
@@ -243,4 +245,46 @@ Route::middleware('auth')->group(function () {
                 ->name('users.roles');
         });
 
+});
+
+// ===================== A. SISI USER (di luar location.required) =====================
+
+Route::get('/location/permission', fn () => view('location.permission'))
+    ->name('location.permission');
+
+Route::post('/location/authorize', [UserLocationController::class, 'authorizeLocation'])
+    ->middleware(['permission:location.track', 'throttle:10,1'])
+    ->name('location.authorize');
+
+Route::prefix('dashboard/location')->name('location.')->group(function () {
+
+    // Update GPS berkala. Klien mengirim tiap ~5 detik (= 12/menit); 30/menit memberi ruang.
+    Route::post('/update', [UserLocationController::class, 'update'])
+        ->middleware(['permission:location.track', 'throttle:30,1'])
+        ->name('update');
+
+    Route::post('/stop', [UserLocationController::class, 'stop'])
+        ->middleware('permission:location.track')
+        ->name('stop');
+});
+
+// ===================== B. SISI ADMIN (di dalam location.required) =====================
+
+Route::prefix('dashboard/location')->name('location.')->group(function () {
+
+    Route::get('/live', [LocationAdminController::class, 'index'])
+        ->middleware('permission:location.view')
+        ->name('live');
+
+    Route::post('/revoke', [UserLocationController::class, 'revoke'])
+        ->middleware('permission:location.track')
+        ->name('revoke');
+
+    Route::get('/live/data', [LocationAdminController::class, 'data'])
+        ->middleware('permission:location.view')
+        ->name('live.data');
+
+    Route::get('/history/{user}', [LocationAdminController::class, 'history'])
+        ->middleware('permission:location.history')
+        ->name('history');
 });

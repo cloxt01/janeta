@@ -6,10 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 
 class WhitelistEntry extends Model
 {
-    protected $fillable = ['chat_id', 'name', 'is_admin'];
 
-    protected function casts(): array
+    public const ADMIN_ROLES = ['admin', 'super_admin'];
+    protected $fillable = ['chat_id', 'name', 'role'];
+
+    public function isAdmin(): bool
     {
-        return ['is_admin' => 'boolean'];
+        return in_array($this->role, self::ADMIN_ROLES);
     }
 }

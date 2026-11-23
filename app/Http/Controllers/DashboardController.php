@@ -59,7 +59,9 @@ class DashboardController extends Controller
         return view('dashboard.index', [
             'olts' => Olt::latest()->get(),
             'whitelistCount' => WhitelistEntry::count(),
-            'adminCount' => User::where('is_admin', true)->count(),
+            'adminCount' => User::whereHas('roles', function ($query) {
+                $query->whereIn('name', ['admin', 'super-admin']);
+            })->count(),
             'userCount' => User::count(),
             'recentWhitelist' => WhitelistEntry::latest()->limit(5)->get(),
         ]);
@@ -267,9 +269,7 @@ class DashboardController extends Controller
         $data = $request->validate([
             'chat_id' => ['required', 'string', 'max:64', 'unique:whitelist_entries,chat_id'],
             'name' => ['nullable', 'string', 'max:255'],
-            'is_admin' => ['boolean'],
         ]);
-        $data['is_admin'] = $request->boolean('is_admin');
         $entry = WhitelistEntry::create($data);
         $this->audit($request, 'whitelist.created', 'Whitelist Telegram '.$entry->chat_id.' ditambahkan.', $entry);
 
@@ -281,9 +281,7 @@ class DashboardController extends Controller
         $data = $request->validate([
             'chat_id' => ['required', 'string', 'max:64', 'unique:whitelist_entries,chat_id,'.$entry->id],
             'name' => ['nullable', 'string', 'max:255'],
-            'is_admin' => ['boolean'],
         ]);
-        $data['is_admin'] = $request->boolean('is_admin');
         $entry->update($data);
         $this->audit($request, 'whitelist.updated', 'Whitelist Telegram '.$entry->chat_id.' diperbarui.', $entry);
 

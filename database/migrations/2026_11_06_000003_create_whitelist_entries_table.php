@@ -11,7 +11,7 @@ return new class extends Migration {
             $table->id();
             $table->string('chat_id', 64)->unique();
             $table->string('name')->nullable();
-            $table->boolean('is_admin')->default(false);
+            $table->string('role')->default('user');
             $table->timestamps();
         });
     }

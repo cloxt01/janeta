@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('role')->default('operator')->after('is_admin');
+            $table->string('role')->default('operator');
             $table->timestamp('last_login_at')->nullable()->after('remember_token');
         });
 

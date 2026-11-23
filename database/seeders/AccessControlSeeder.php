@@ -64,6 +64,12 @@ class AccessControlSeeder extends Seeder
                     'access.view'   => 'Melihat Access Control',
                     'access.manage' => 'Mengelola Access Control',
                 ],
+
+                'Location' => [
+                    'location.track'   => 'Dilacak Lokasinya (Wajib Izin GPS)',
+                    'location.view'    => 'Melihat Live Location',
+                    'location.history' => 'Melihat Riwayat Lokasi',
+                ],
             ];
 
             $permissionIds = [];
@@ -172,6 +178,8 @@ class AccessControlSeeder extends Seeder
 
                     'access.view',
                     'access.manage',
+
+                    'location.track',
                 ],
 
                 // Operasional jaringan
@@ -186,6 +194,8 @@ class AccessControlSeeder extends Seeder
                     'olt.activity.view',
                     'olt.view',
                     'olt.test',
+
+                    'location.track',
                 ],
 
                 // Customer Care
@@ -193,6 +203,8 @@ class AccessControlSeeder extends Seeder
                     'dashboard.view',
                     'ont.lookup',
                     'ont.processing',
+
+                    'location.track',
                 ],
 
                 // Read only
@@ -203,6 +215,8 @@ class AccessControlSeeder extends Seeder
                     'olt.view',
                     'olt.activity.view',
                     'telegram.view',
+
+                    'location.track',
                 ],
             ];
 

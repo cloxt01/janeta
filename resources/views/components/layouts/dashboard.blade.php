@@ -1,9 +1,9 @@
-
 <!doctype html>
 <html lang="id">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $title ?? 'Dashboard' }} · JANETA</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
@@ -19,6 +19,8 @@
     $canUsers = $user->hasPermission('users.view');
     $canAudit = $user->hasPermission('audit.view');
     $canAccess = $user->hasPermission('access.view');
+    $canLocation = $user->hasPermission('location.view');
+    $canTrack = $user->hasPermission('location.track');
 @endphp
 
 <header class="jn-navbar border-b border-slate-800 bg-[#0f172a]/50 backdrop-blur">
@@ -151,6 +153,17 @@
         @endif
 
 
+        {{-- LIVE LOCATION --}}
+        @if($canLocation)
+            <a href="{{ route('location.live') }}"
+               class="{{ request()->routeIs('location.live', 'location.history') ? 'active' : '' }}">
+
+                <i data-lucide="map-pin"></i>
+                Live Location
+            </a>
+        @endif
+
+
         {{-- AUDIT LOG --}}
         @if($canAudit)
             <a href="{{ route('audit-logs') }}"
@@ -182,7 +195,8 @@
             {{ $user->name }}
         </span>
 
-        <form method="post" action="{{ route('logout') }}">
+        <form method="post" action="{{ route('logout') }}"
+              onsubmit="window.__locationTracker && window.__locationTracker.stop();">
             @csrf
 
             <button
@@ -258,6 +272,11 @@
 
     });
 </script>
+
+{{-- GPS TRACKER (hanya untuk user dengan permission location.track) --}}
+@if($canTrack)
+    @include('location._tracker')
+@endif
 
 @stack('scripts')
 
