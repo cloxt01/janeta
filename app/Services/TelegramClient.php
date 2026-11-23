@@ -23,7 +23,7 @@ class TelegramClient
             ->connectTimeout(10);
     }
 
-    public function call(string $method, array $parameters = [], int $timeout = 60): array|bool
+    public function call(string $method, array $parameters = [], int $timeout = 15): array|bool
     {
         $attempts = 3;
 
@@ -49,7 +49,7 @@ class TelegramClient
                     $wait = $response->status() === 429
                         ? (int) $response->json('parameters.retry_after', 1)
                         : $i;
-                    
+
                     Log::warning("Telegram {$method} merespons status {$response->status()}, menunggu {$wait} detik...", [
                         'attempt' => $i
                     ]);
@@ -172,7 +172,7 @@ class TelegramClient
             'offset' => $offset,
             'timeout' => $poll,
             'allowed_updates' => ['message', 'callback_query'],
-        ], $poll + 15); 
+        ], $poll + 15);
 
         if (!is_array($result)) {
             throw new RuntimeException('Telegram getUpdates mengembalikan result bukan array.');

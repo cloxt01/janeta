@@ -2,16 +2,17 @@
 
 namespace App\Jobs;
 
-use App\Events\OltServiceRequestUpdated;
 use App\Events\OltActivityUpdated;
-use App\Models\Olt;
+use App\Events\OltServiceRequestUpdated;
 use App\Models\OltServiceRequest;
+use App\Models\OntAuditLog;
 use App\Services\OltService;
 use App\Services\TelegramClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -20,33 +21,62 @@ class ProcessOltServices implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
-    public int $timeout = 300;
+    /**
+     * tries = 0 + retryUntil(): job yang "dilepas" oleh WithoutOverlapping
+     * tidak dihitung gagal. Kegagalan OLT TIDAK di-retry karena exception
+     * tidak dilempar ulang (lihat catch di handle()).
+     */
+    public int $tries = 0;
+    public int $timeout = 120;
+    public bool $failOnTimeout = true;
 
-    public function __construct(
-        public int $requestId
-    ) {
+    /** Operasi baca: aman dijalankan paralel, tanpa lock. */
+    private const READ_ONLY = [
+        'ont.version',
+        'ont.lookup',
+        'ont.serial',
+        'ont.find',
+        'ont.port_scan',
+        'ont.wlan',
+        'ont.description',
+    ];
+
+    public function __construct(public int $requestId)
+    {
         $this->onQueue('olt');
+    }
+
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addMinutes(5);
     }
 
     public function middleware(): array
     {
         $task = OltServiceRequest::find($this->requestId);
 
+        if ($task && in_array($task->operation, self::READ_ONLY, true)) {
+            return [];
+        }
+
+        // Operasi tulis (restart/aktif/nonaktif): satu per OLT, bukan satu global.
+        $payload = (array) ($task?->payload ?? []);
+        $oltKey = strtolower((string) ($payload['olt'] ?? 'global'));
+
         return [
-            (new \Illuminate\Queue\Middleware\WithoutOverlapping(
-                'olt:'.($task?->olt_id ?? 'global')
-            ))
-                ->releaseAfter(10)
-                ->expireAfter(360),
+            (new WithoutOverlapping("olt:{$oltKey}"))
+                ->releaseAfter(3)
+                ->expireAfter(180),
         ];
     }
-
 
     public function handle(OltService $service, TelegramClient $telegram): void
     {
         $task = OltServiceRequest::findOrFail($this->requestId);
         $startedAt = microtime(true);
+        $params = (array) ($task->payload ?? []);
+
+        $waited = $task->created_at ? (int) $task->created_at->diffInSeconds(now()) : null;
 
         $task->update([
             'status' => 'running',
@@ -56,18 +86,7 @@ class ProcessOltServices implements ShouldQueue
             'error' => null,
         ]);
 
-        $params = $task->payload ?? [];
-        $this->broadcast(
-            $task->fresh(),
-            'running',
-            'Proses OLT sedang dijalankan.'
-        );
-
-        $this->broadcastActivity(
-            $task->fresh(),
-            'running',
-            'Proses OLT sedang dijalankan.'
-        );
+        $this->notify($task, 'running', 'Proses OLT sedang dijalankan.');
 
         try {
             $result = match ($task->operation) {
@@ -76,55 +95,29 @@ class ProcessOltServices implements ShouldQueue
                 'ont.version' => $service->apiVersion($params['id']),
                 'ont.serial' => $service->bySerial($params['sn']),
                 'ont.find' => $service->findPortOnt(
-                    $params['frame'],
-                    $params['slot'],
-                    $params['port'],
-                    $params['ont_id']
+                    $params['frame'], $params['slot'], $params['port'], $params['ont_id']
                 ),
                 'ont.restart' => $service->restart(
-                    $params['olt'],
-                    $params['frame'],
-                    $params['slot'],
-                    $params['port'],
-                    $params['ont_id']
+                    $params['olt'], $params['frame'], $params['slot'], $params['port'], $params['ont_id']
                 ),
                 'ont.activate' => $service->setOntState(
-                    $params['olt'],
-                    $params['frame'],
-                    $params['slot'],
-                    $params['port'],
-                    $params['ont_id'],
-                    true
+                    $params['olt'], $params['frame'], $params['slot'], $params['port'], $params['ont_id'], true
                 ),
                 'ont.deactivate' => $service->setOntState(
-                    $params['olt'],
-                    $params['frame'],
-                    $params['slot'],
-                    $params['port'],
-                    $params['ont_id'],
-                    false
+                    $params['olt'], $params['frame'], $params['slot'], $params['port'], $params['ont_id'], false
                 ),
                 'ont.wlan' => $service->wlan(
-                    $params['olt'],
-                    $params['frame'],
-                    $params['slot'],
-                    $params['port'],
-                    $params['ont_id']
+                    $params['olt'], $params['frame'], $params['slot'], $params['port'], $params['ont_id']
                 ),
                 'ont.port_scan' => $service->findPort(
-                    $params['olt'],
-                    $params['frame'],
-                    $params['slot'],
-                    $params['port']
+                    $params['olt'], $params['frame'], $params['slot'], $params['port']
                 ),
                 default => throw new \InvalidArgumentException(
                     "Unknown OLT operation: {$task->operation}"
                 ),
             };
 
-            $duration = (int) round(
-                (microtime(true) - $startedAt) * 1000
-            );
+            $duration = (int) round((microtime(true) - $startedAt) * 1000);
 
             $task->update([
                 'status' => 'completed',
@@ -133,58 +126,17 @@ class ProcessOltServices implements ShouldQueue
                 'finished_at' => now(),
             ]);
 
-            $task = $task->fresh();
+            Log::info('JANETA OLT job done', [
+                'id' => $task->id,
+                'op' => $task->operation,
+                'waited_s' => $waited,   // lama di antrean
+                'run_ms' => $duration,   // lama eksekusi di OLT
+            ]);
 
-            $this->broadcast(
-                $task,
-                'completed',
-                'Proses OLT berhasil.',
-                $result
-            );
-
-            $this->broadcastActivity(
-                $task,
-                'completed',
-                'Proses OLT berhasil.',
-                $result
-            );
-
-            // KIRIM HASIL DAN INLINE KEYBOARD KE TELEGRAM
-            if (!empty($params['chat_id'])) {
-                Log::info('JANETA TELEGRAM FORMAT TRACE', [
-                    'task_id' => $task->id,
-                    'operation' => '[' . $task->operation . ']',
-                    'operation_length' => strlen($task->operation),
-                    'result_type' => gettype($result),
-                    'result_keys' => is_array($result)
-                        ? array_keys($result)
-                        : null,
-                ]);
-
-                $formattedMessage = $this->formatTelegramResult(
-                    $task->operation,
-                    $result
-                );
-
-                $buttons = is_array($result)
-                    ? $this->telegramActionButtons(
-                        $task->operation,
-                        $result
-                    )
-                    : null;
-
-                $telegram->sendMessage(
-                    $params['chat_id'],
-                    $formattedMessage,
-                    $buttons,
-                    'HTML'
-                );
-            }
-
+            $this->notify($task, 'completed', 'Proses OLT berhasil.', $result);
+            $this->audit($task->operation, $params, $result);
         } catch (Throwable $e) {
-            $duration = (int) round(
-                (microtime(true) - $startedAt) * 1000
-            );
+            $duration = (int) round((microtime(true) - $startedAt) * 1000);
 
             $task->update([
                 'status' => 'failed',
@@ -193,43 +145,102 @@ class ProcessOltServices implements ShouldQueue
                 'finished_at' => now(),
             ]);
 
-            $task = $task->fresh();
+            Log::error('JANETA OLT job failed', [
+                'id' => $task->id,
+                'op' => $task->operation,
+                'waited_s' => $waited,
+                'run_ms' => $duration,
+                'error' => $e->getMessage(),
+            ]);
 
-            $this->broadcast(
-                $task,
-                'failed',
-                'Proses OLT gagal.',
-                null,
-                $e->getMessage()
-            );
-
-            $this->broadcastActivity(
-                $task,
-                'failed',
-                'Proses OLT gagal.',
-                null,
-                $e->getMessage()
-            );
+            $this->notify($task, 'failed', 'Proses OLT gagal.', null, $e->getMessage());
 
             if (!empty($params['chat_id'])) {
-                $telegram->sendMessage(
+                $this->safely(fn () => $telegram->sendMessage(
                     $params['chat_id'],
-                    "❌ Gagal memproses perintah: {$e->getMessage()}"
-                );
+                    '❌ Gagal memproses perintah: ' . $this->telegramEscape($e->getMessage()),
+                    null,
+                    'HTML'
+                ));
             }
 
-            throw $e;
+            // Sengaja TIDAK throw: tidak ada retry otomatis ke OLT
+            // dan teknisi hanya menerima satu pesan gagal.
+            return;
+        }
+
+        // Kirim ke Telegram di luar try utama: kegagalan Telegram
+        // tidak boleh mengubah status task yang sudah completed.
+        if (!empty($params['chat_id'])) {
+            $this->safely(function () use ($telegram, $task, $result, $params) {
+                $telegram->sendMessage(
+                    $params['chat_id'],
+                    $this->formatTelegramResult($task->operation, $result),
+                    is_array($result) ? $this->telegramActionButtons($task->operation, $result) : null,
+                    'HTML'
+                );
+            });
         }
     }
 
+    /* ------------------------------------------------------------------ */
+    /* Helper                                                              */
+    /* ------------------------------------------------------------------ */
 
-        private function telegramEscape(mixed $value): string
+    private function safely(callable $fn): void
     {
-        return htmlspecialchars(
-            (string) ($value ?? '-'),
-            ENT_QUOTES | ENT_SUBSTITUTE,
-            'UTF-8'
-        );
+        try {
+            $fn();
+        } catch (Throwable $e) {
+            Log::warning('JANETA side-effect gagal (diabaikan)', ['error' => $e->getMessage()]);
+        }
+    }
+
+    private function notify(
+        OltServiceRequest $task,
+        string $status,
+        ?string $message = null,
+        mixed $result = null,
+        ?string $error = null
+    ): void {
+        $this->safely(fn () => event(new OltServiceRequestUpdated(
+            request_id: $task->uuid,
+            user_id: (int) $task->user_id,
+            operation: $task->operation,
+            status: $status,
+            message: $message,
+            result: $result,
+            error: $error,
+        )));
+
+        $this->safely(fn () => event(new OltActivityUpdated(
+            \App\Support\OltActivityPresenter::make($task, $status, $message, $error)
+        )));
+    }
+
+    private function audit(string $operation, array $params, mixed $result): void
+    {
+        if (!in_array($operation, ['ont.activate', 'ont.deactivate'], true) || !is_array($result)) {
+            return;
+        }
+
+        $this->safely(fn () => OntAuditLog::create([
+            'chat_id' => (string) ($params['tg_user_id'] ?? $params['chat_id'] ?? ''),
+            'user_name' => $params['tg_name'] ?? null,
+            'action' => $operation === 'ont.activate' ? 'activate' : 'deactivate',
+            'olt' => $params['olt'],
+            'frame' => $params['frame'],
+            'slot' => $params['slot'],
+            'port' => $params['port'],
+            'ont_id' => $params['ont_id'],
+            'ok' => (bool) ($result['ok'] ?? false),
+            'message' => $result['message'] ?? null,
+        ]));
+    }
+
+    private function telegramEscape(mixed $value): string
+    {
+        return htmlspecialchars((string) ($value ?? '-'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
     private function lookupOnt(OltService $service, array $params): ?array
@@ -240,11 +251,16 @@ class ProcessOltServices implements ShouldQueue
         }
         $result = $service->apiVersion($id);
         if ($result && !empty($params['wifi'])) {
-            $result['wlan'] = $service->wlan($result['olt'], $result['frame'], $result['slot'], $result['port'], $result['ontId']);
+            $result['wlan'] = $service->wlan(
+                $result['olt'], $result['frame'], $result['slot'], $result['port'], $result['ontId']
+            );
         }
         return $result;
     }
 
+    /* ------------------------------------------------------------------ */
+    /* Format pesan Telegram                                               */
+    /* ------------------------------------------------------------------ */
 
     private function formatPortScanResult(array $result): string
     {
@@ -275,42 +291,85 @@ class ProcessOltServices implements ShouldQueue
             $ontId = $this->telegramEscape($ont['ontId'] ?? '-');
             $sn = $this->telegramEscape($ont['sn'] ?? '-');
             $description = $this->telegramEscape($ont['description'] ?? '-');
-
             $state = strtoupper((string) ($ont['runState'] ?? 'UNKNOWN'));
-
             $icon = $state === 'ONLINE' ? '🟢' : '🔴';
+            $stateEsc = $this->telegramEscape($state);
 
             $message .= "{$icon} <b>ONT ID {$ontId}</b>\n"
                 . "SN: <code>{$sn}</code>\n"
                 . "Pelanggan: {$description}\n"
-                . "Status: <b>{$this->telegramEscape($state)}</b>\n\n";
+                . "Status: <b>{$stateEsc}</b>\n\n";
         }
 
         return $message;
     }
 
+    private function formatWlanResult(array $w, array $result = []): string
+    {
+        $header = "<b>📶 HASIL ANALISIS WLAN / WI-FI ONT</b>\n\n";
 
+        if (!($w['success'] ?? false)) {
+            $label = match ($w['status'] ?? 'error') {
+                'unsupported' => '⚠️ FITUR WLAN TIDAK DIDUKUNG',
+                'rejected' => '❌ PERINTAH DITOLAK OLT',
+                'no_data' => '⚠️ DATA WLAN TIDAK TERSEDIA',
+                default => '❌ PEMERIKSAAN WLAN GAGAL',
+            };
+
+            $text = $header . "<b>{$label}</b>\n\n"
+                . $this->telegramEscape($w['message'] ?? 'Terjadi kesalahan saat memeriksa WLAN.');
+
+            if (!empty($w['original_message'])) {
+                $original = str_replace(["\n", "\r"], ' ', (string) $w['original_message']);
+                $text .= "\n\n<b>Detail Respons OLT:</b>\n<code>" . $this->telegramEscape($original) . '</code>';
+            }
+
+            return $text;
+        }
+
+        $text = $header . "✅ <b>DATA WLAN BERHASIL DIPEROLEH</b>\n\n";
+
+        foreach (($w['ssids'] ?? []) as $ssid) {
+            $text .= '<b>[SSID INDEX ' . $this->telegramEscape($ssid['index'] ?? '-') . '] - '
+                . $this->telegramEscape($ssid['name'] ?? '-') . "</b>\n"
+                . '  • Administrative state: ' . $this->telegramEscape($ssid['adminState'] ?? '-') . "\n"
+                . '  • Operational state: ' . $this->telegramEscape($ssid['opState'] ?? '-') . "\n"
+                . '  • Maximum associate number: ' . $this->telegramEscape($ssid['deviceMax'] ?? '-') . "\n"
+                . '  • Current associate number: <b>' . $this->telegramEscape($ssid['deviceCount'] ?? '-') . " Devices</b>\n\n";
+        }
+
+        return $text;
+    }
 
     private function formatTelegramResult(string $operation, mixed $result): string
     {
         if (!$result || !is_array($result)) {
-            return "❌ Data tidak ditemukan atau perangkat offline.";
+            return '❌ Data tidak ditemukan atau perangkat offline.';
         }
 
         $operation = strtolower(trim($operation));
 
         if ($operation === 'ont.port_scan') {
-            Log::info('JANETA PORT SCAN RAW RESULT', [
-                'result' => $result,
-            ]);
             return $this->formatPortScanResult($result);
         }
 
-        if (in_array($operation, [
-            'ont.version',
-            'ont.lookup',
-            'ont.serial',
-        ], true)) {
+        if ($operation === 'ont.wlan') {
+            return $this->formatWlanResult($result);
+        }
+
+        if (in_array($operation, ['ont.restart', 'ont.activate', 'ont.deactivate'], true)) {
+            $ok = (bool) ($result['ok'] ?? $result['success'] ?? false);
+            $label = match ($operation) {
+                'ont.restart' => 'RESTART',
+                'ont.activate' => 'AKTIVASI',
+                default => 'DEAKTIVASI',
+            };
+
+            return ($ok ? '✅' : '❌') . " <b>{$label} ONT</b>\n"
+                . $this->telegramEscape($result['message'] ?? ($ok ? 'Berhasil.' : 'Gagal.'));
+        }
+
+        if (in_array($operation, ['ont.version', 'ont.lookup', 'ont.serial'], true)) {
             $online = strtolower((string) ($result['runState'] ?? '')) === 'online';
 
             $customerId = $this->telegramEscape($result['customerId'] ?? '-');
@@ -336,7 +395,7 @@ class ProcessOltServices implements ShouldQueue
                     . "Status ONT: <code>{$runState}</code>\n"
                     . "Last Down Cause: <code>{$lastDownCause}</code>\n"
                     . "Last Up Time: <code>{$lastUpTime}</code>\n\n"
-                    . "⚠️ <b>Keterangan:</b> ONT tidak online.";
+                    . '⚠️ <b>Keterangan:</b> ONT tidak online.';
             }
 
             $rxRaw = (string) ($result['rxPower'] ?? '-');
@@ -348,39 +407,34 @@ class ProcessOltServices implements ShouldQueue
                     : ' <b>(Normal)</b>')
                 : ' <b>(LOS)</b>';
 
+            $e = fn (string $k) => $this->telegramEscape($result[$k] ?? '-');
+
             return $customer
                 . "\n<b>[ INFORMASI OPTIK / FISIK ]</b>\n"
                 . "RX Power (ONT): <b>{$rx} dBm</b>{$signal}\n"
-                . "TX Power (ONT): <b>{$this->telegramEscape($result['txPower'] ?? '-')} dBm</b>\n"
-                . "OLT Rx ONT Power: <b>{$this->telegramEscape($result['oltRxPower'] ?? '-')} dBm</b>\n"
-                . "Temperature: <i>{$this->telegramEscape($result['temp'] ?? '-')} C</i>\n"
-                . "Voltage: <i>{$this->telegramEscape($result['voltage'] ?? '-')} V</i>\n"
+                . "TX Power (ONT): <b>{$e('txPower')} dBm</b>\n"
+                . "OLT Rx ONT Power: <b>{$e('oltRxPower')} dBm</b>\n"
+                . "Temperature: <i>{$e('temp')} C</i>\n"
+                . "Voltage: <i>{$e('voltage')} V</i>\n"
                 . "Status ONT: <code>{$runState}</code>\n"
                 . "Last Up Time: <code>{$lastUpTime}</code>\n\n"
                 . "<b>[ STATUS WAN INTERNET ]</b>\n"
-                . "Connection Type: <code>{$this->telegramEscape($result['wanConnType'] ?? '-')}</code>\n"
-                . "IPv4 Conn Status: <b>{$this->telegramEscape($result['wanStatus'] ?? '-')}</b>\n"
-                . "IPv4 Access Type: <i>{$this->telegramEscape($result['wanAccessType'] ?? '-')}</i>\n"
-                . "IPv4 Address: <code>{$this->telegramEscape($result['wanIp'] ?? '-')}</code>\n"
-                . "Subnet Mask: <code>{$this->telegramEscape($result['wanSubnet'] ?? '-')}</code>\n"
-                . "Default Gateway: <code>{$this->telegramEscape($result['wanGateway'] ?? '-')}</code>\n"
-                . "Primary DNS: <code>{$this->telegramEscape($result['wanDns1'] ?? '-')}</code>\n"
-                . "Secondary DNS: <code>{$this->telegramEscape($result['wanDns2'] ?? '-')}</code>";
+                . "Connection Type: <code>{$e('wanConnType')}</code>\n"
+                . "IPv4 Conn Status: <b>{$e('wanStatus')}</b>\n"
+                . "IPv4 Access Type: <i>{$e('wanAccessType')}</i>\n"
+                . "IPv4 Address: <code>{$e('wanIp')}</code>\n"
+                . "Subnet Mask: <code>{$e('wanSubnet')}</code>\n"
+                . "Default Gateway: <code>{$e('wanGateway')}</code>\n"
+                . "Primary DNS: <code>{$e('wanDns1')}</code>\n"
+                . "Secondary DNS: <code>{$e('wanDns2')}</code>";
         }
 
         return "✅ Operasi <code>{$this->telegramEscape($operation)}</code> berhasil diselesaikan.";
     }
 
-
-
-
     private function telegramActionButtons(string $operation, array $result): ?array
     {
-        if (!in_array($operation, [
-            'ont.version',
-            'ont.lookup',
-            'ont.serial',
-        ], true)) {
+        if (!in_array($operation, ['ont.version', 'ont.lookup', 'ont.serial'], true)) {
             return null;
         }
 
@@ -390,103 +444,35 @@ class ProcessOltServices implements ShouldQueue
         $port = (string) ($result['port'] ?? '');
         $ontId = (string) ($result['ontId'] ?? '');
 
-        // Pastikan seluruh koordinat tersedia.
         if (
             $olt === '' ||
-            !ctype_digit($frame) ||
-            !ctype_digit($slot) ||
-            !ctype_digit($port) ||
-            !ctype_digit($ontId)
+            !ctype_digit($frame) || !ctype_digit($slot) ||
+            !ctype_digit($port) || !ctype_digit($ontId)
         ) {
             Log::warning('JANETA action buttons skipped: incomplete ONT coordinates', [
-                'operation' => $operation,
-                'olt' => $olt,
-                'frame' => $frame,
-                'slot' => $slot,
-                'port' => $port,
-                'ont_id' => $ontId,
+                'operation' => $operation, 'olt' => $olt,
+                'frame' => $frame, 'slot' => $slot, 'port' => $port, 'ont_id' => $ontId,
             ]);
-
             return null;
         }
 
         $coordinate = "{$olt}_{$frame}_{$slot}_{$port}_{$ontId}";
 
-        $controlFlag = strtolower(trim(
-            (string) ($result['controlFlag'] ?? '')
-        ));
+        $controlFlag = strtolower(trim((string) ($result['controlFlag'] ?? '')));
+        $runState = strtolower(trim((string) ($result['runState'] ?? '')));
 
-        $runState = strtolower(trim(
-            (string) ($result['runState'] ?? '')
-        ));
-
-        // ONT DEACTIVE: hanya tampilkan tombol aktivasi.
         if (in_array($controlFlag, ['deactive', 'deactivated'], true)) {
-            return [
-                [
-                    [
-                        'text' => '🟢 Aktifkan ONT',
-                        'callback_data' => "act_{$coordinate}",
-                    ],
-                ],
-            ];
+            return [[['text' => '🟢 Aktifkan ONT', 'callback_data' => "act_{$coordinate}"]]];
         }
 
-        // ONT harus online untuk menampilkan aksi normal.
         if ($runState !== 'online') {
             return null;
         }
 
-        // ONT ACTIVE: tampilkan tombol operasional.
         return [
-            [
-                [
-                    'text' => '🔄 Restart ONT',
-                    'callback_data' => "reboot_{$coordinate}",
-                ],
-            ],
-            [
-                [
-                    'text' => '🔴 Nonaktifkan ONT',
-                    'callback_data' => "deact_{$coordinate}",
-                ],
-            ],
-            [
-                [
-                    'text' => '📶 Cek WLAN / Wi-Fi',
-                    'callback_data' => "wlan_{$coordinate}",
-                ],
-            ],
+            [['text' => '🔄 Restart ONT', 'callback_data' => "reboot_{$coordinate}"]],
+            [['text' => '🔴 Nonaktifkan ONT', 'callback_data' => "deact_{$coordinate}"]],
+            [['text' => '📶 Cek WLAN / Wi-Fi', 'callback_data' => "wlan_{$coordinate}"]],
         ];
-    }
-
-
-
-    private function broadcast(?OltServiceRequest $task, string $status, ?string $message = null, mixed $result = null, ?string $error = null): void 
-    {
-
-        event(new OltServiceRequestUpdated(
-            request_id: $task->uuid,
-            user_id: (int) $task->user_id,
-            operation: $task->operation,
-            status: $status,
-            message: $message,
-            result: $result,
-            error: $error,
-        ));
-    }
-
-    private function broadcastActivity(
-        ?OltServiceRequest $task,
-        string $status,
-        ?string $message = null,
-        mixed $result = null,
-        ?string $error = null
-    ): void {
-        if (!$task) return;
-
-        event(new OltActivityUpdated(
-            \App\Support\OltActivityPresenter::make($task, $status, $message, $error)
-        ));
     }
 }
