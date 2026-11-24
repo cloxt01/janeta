@@ -802,12 +802,20 @@ class OltService
         };
 
         $raw = '';
+        $portRaw = '';
+
         if (strtolower($data['state']) === 'online') {
             $this->command($data['olt'], 'config');
             $this->command($data['olt'], "interface gpon {$data['frame']}/{$data['slot']}");
             $raw = ($this->command($data['olt'], "display ont optical-info {$data['port']} {$data['ontId']}") ?? '') .
                 ($this->command($data['olt'], "display ont wan-info {$data['port']} {$data['ontId']}") ?? '');
+            $portRaw = $this->command($data['olt'], "display port state {$data['port']}") ?? '';
         }
+
+        $portValue = function (string $pattern, ?string $default = null) use ($portRaw): ?string {
+            return preg_match($pattern, $portRaw, $m) ? trim($m[1]) : $default;
+        };
+
         $value = function (string $pattern, string $default) use ($raw): string {
             return preg_match($pattern, $raw, $m) ? trim($m[1]) : $default;
         };
@@ -817,6 +825,10 @@ class OltService
             'controlFlag' => strtolower(
                 $infoValue('/Control\s*flag\s*:\s*([^\r\n]+)/i')
             ),
+            'oltTxPower' => $portValue('/TX\s*power\s*\(dBm\)\s*:?\s*([-\d.]+)/i', '-'),
+            'odnClass'   => $portValue('/Module\s*sub-type\s*:?\s*(CLASS\s*[A-D]\+{0,2})/i'),
+            'ponType'    => preg_match('/Module\s*type\s*:?\s*(XG-?S-?PON|XGPON|GPON|EPON)/i', $portRaw, $pt) ? strtoupper($pt[1]) : 'GPON',
+            'distance' => preg_match('/ONT\s+distance\(m\)\s*:\s*(\d+)/i', $info, $dm) ? (int) $dm[1] : null,
             'rxPower' => $value('/Rx\s*optical\s*power(?:\(dBm\))?\s*:\s*([-\d.]+)/i', '-80.00'),
             'txPower' => $value('/Tx\s*optical\s*power(?:\(dBm\))?\s*:\s*([-\d.]+)/i', '-80.00'),
             'oltRxPower' => $value('/OLT\s*Rx\s*ONT\s*optical\s*power(?:\(dBm\))?\s*:\s*([-\d.]+)/i', '-80.00'),
