@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\WhitelistController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\AuditController;
 use App\Http\Controllers\LocationAdminController;
 use App\Http\Controllers\Router\MikrotikController;
 use App\Http\Controllers\UserLocationController;
@@ -233,7 +234,7 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     */
 
-    Route::get('/dashboard/audit-logs', [DashboardController::class, 'auditLogs'])
+    Route::get('/dashboard/audit-logs', [AuditController::class, 'logs'])
         ->middleware('permission:audit.view')
         ->name('audit-logs');
 
