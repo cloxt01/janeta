@@ -108,7 +108,7 @@ body {
     align-items: center;
     gap: 7px;
     padding: 0 10px;
-    border-bottom: 2px solid transparent;
+    /*border-bottom: 2px solid transparent;*/
     color: #94a3b8;
     cursor: pointer;
     font-size: 11px;
@@ -152,7 +152,7 @@ body {
     width: max-content;
     min-width: 156px;
     padding: 5px;
-    border: 1px solid #263449;
+    /*border: 1px solid #263449;*/
     border-radius: 7px;
     background: #111c30;
     box-shadow: 0 10px 24px rgb(2 6 23 / 28%);

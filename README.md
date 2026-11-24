@@ -8,7 +8,8 @@ OLT, master data ONT, role pengguna, audit log, dan export laporan.
 
 - PHP 8.2:
   `openssl` 
-  `mbstring` 
+  `mbstring`
+  `sockets`
   `pdo_mysql`
   `gd`
   `curl`

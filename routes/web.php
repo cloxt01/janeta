@@ -1,11 +1,13 @@
 <?php
 
-
+use App\Http\Controllers\WhitelistController;
+use App\Http\Controllers\UserController;
 use App\Http\Controllers\LocationAdminController;
+use App\Http\Controllers\Router\MikrotikController;
 use App\Http\Controllers\UserLocationController;
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\OntController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\OltController;
 use App\Http\Controllers\OltActivityController;
 use App\Http\Controllers\AccessControlController;
 
@@ -106,35 +108,64 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     */
 
+    Route::prefix('dashboard/router')
+        ->name('router.')
+        ->group(function () {
+
+            // Group khusus MikroTik
+            Route::prefix('mikrotik')
+                ->name('mikrotik.')
+                ->controller(MikrotikController::class)
+                ->group(function () {
+                    Route::get('/', 'index')->middleware('permission:router-mikrotik.view')->name('index');
+                    Route::post('/', 'store')->middleware('permission:router-mikrotik.store')->name('store');
+                    Route::get('/{mikrotik}', 'show')->middleware('permission:router-mikrotik.show')->name('show');
+                    Route::put('/{mikrotik}', 'update')->middleware('permission:router-mikrotik.update')->middleware('permission:router-mikrotik.view')->name('update');
+                    Route::post('/capture', 'capture')->middleware('permission:router-mikrotik.capture')->name('capture');
+                    Route::delete('/{mikrotik}', 'destroy')->middleware('permission:router-mikrotik.destroy')->name('destroy');
+                    Route::post('/test-all', 'testAll')->middleware('permission:router-mikrotik.test')->name('test-all');
+                    Route::post('/{mikrotik}/test-connection', 'testConnection')->middleware('permission:router-mikrotik.test')->name('test');
+                });
+
+            // Nanti tinggal tambah group vendor lain di sini, misalnya:
+            // Route::prefix('cisco')
+            //     ->name('cisco.')
+            //     ->controller(CiscoRouterController::class)
+            //     ->group(function () {
+            //         Route::get('/', 'index')->name('index');
+            //     });
+
+        });
+
     Route::prefix('dashboard/olts')
         ->name('olts.')
         ->group(function () {
 
-            Route::get('/', [DashboardController::class, 'olts'])
+            Route::get('/', [OltController::class, 'index'])
                 ->middleware('permission:olt.view')
                 ->name('index');
 
-            Route::get('/ports', [DashboardController::class, 'oltPorts'])
+            Route::get('/ports', [OltController::class, 'ports'])
                 ->middleware('permission:olt.view')
                 ->name('ports');
 
-            Route::post('/', [DashboardController::class, 'storeOlt'])
+            Route::post('/', [OltController::class, 'store'])
                 ->middleware('permission:olt.create')
                 ->name('store');
 
-            Route::put('/{olt}', [DashboardController::class, 'updateOlt'])
+            Route::put('/{olt}', [OltController::class, 'update'])
                 ->middleware('permission:olt.update')
                 ->name('update');
 
-            Route::delete('/{olt}', [DashboardController::class, 'destroyOlt'])
+            Route::delete('/{olt}', [OltController::class, 'destroy'])
                 ->middleware('permission:olt.delete')
                 ->name('destroy');
 
-            Route::post('/{olt}/test', [DashboardController::class, 'testOlt'])
+            Route::post('/{olt}/test', [OltController::class, 'test'])
                 ->middleware('permission:olt.test')
                 ->name('test');
 
-            Route::post('/test-all', [DashboardController::class, 'testAllOlts'])
+            Route::post('/test-all', [OltController::class, 'testAll'])
                 ->middleware('permission:olt.test')
                 ->name('test-all');
         });
@@ -150,19 +181,19 @@ Route::middleware('auth')->group(function () {
         ->name('whitelist.')
         ->group(function () {
 
-            Route::get('/', [DashboardController::class, 'whitelist'])
+            Route::get('/', [WhitelistController::class, 'index'])
                 ->middleware('permission:telegram.view')
                 ->name('index');
 
-            Route::post('/', [DashboardController::class, 'storeWhitelist'])
+            Route::post('/', [WhitelistController::class, 'store'])
                 ->middleware('permission:telegram.manage')
                 ->name('store');
 
-            Route::put('/{entry}', [DashboardController::class, 'updateWhitelist'])
+            Route::put('/{entry}', [WhitelistController::class, 'update'])
                 ->middleware('permission:telegram.manage')
                 ->name('update');
 
-            Route::delete('/{entry}', [DashboardController::class, 'destroyWhitelist'])
+            Route::delete('/{entry}', [WhitelistController::class, 'destroy'])
                 ->middleware('permission:telegram.manage')
                 ->name('destroy');
         });
@@ -178,19 +209,19 @@ Route::middleware('auth')->group(function () {
         ->name('users.')
         ->group(function () {
 
-            Route::get('/', [DashboardController::class, 'users'])
+            Route::get('/', [UserController::class, 'index'])
                 ->middleware('permission:users.view')
                 ->name('index');
 
-            Route::post('/', [DashboardController::class, 'storeUser'])
+            Route::post('/', [UserController::class, 'store'])
                 ->middleware('permission:users.create')
                 ->name('store');
 
-            Route::put('/{user}', [DashboardController::class, 'updateUser'])
+            Route::put('/{user}', [UserController::class, 'update'])
                 ->middleware('permission:users.update')
                 ->name('update');
 
-            Route::delete('/{user}', [DashboardController::class, 'destroyUser'])
+            Route::delete('/{user}', [UserController::class, 'destroy'])
                 ->middleware('permission:users.delete')
                 ->name('destroy');
         });

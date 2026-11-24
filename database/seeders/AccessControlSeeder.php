@@ -70,6 +70,18 @@ class AccessControlSeeder extends Seeder
                     'location.view'    => 'Melihat Live Location',
                     'location.history' => 'Melihat Riwayat Lokasi',
                 ],
+
+                'Router' => [
+                    'router-mikrotik.view'    => 'Melihat Router MikroTik',
+                    'router-mikrotik.show'    => 'Melihat Detail Router MikroTik',
+                    'router-mikrotik.store'   => 'Menambahkan Router MikroTik',
+                    'router-mikrotik.update'  => 'Mengubah Router MikroTik',
+                    'router-mikrotik.destroy' => 'Menghapus Router MikroTik',
+                    'router-mikrotik.capture' => 'Capture Data Router MikroTik',
+                    'router-mikrotik.test'    => 'Testing Koneksi Router MikroTik',
+                ],
+
+
             ];
 
             $permissionIds = [];
@@ -180,6 +192,14 @@ class AccessControlSeeder extends Seeder
                     'access.manage',
 
                     'location.track',
+
+                    'router-mikrotik.view',
+                    'router-mikrotik.show',
+                    'router-mikrotik.store',
+                    'router-mikrotik.update',
+                    'router-mikrotik.destroy',
+                    'router-mikrotik.capture',
+                    'router-mikrotik.test',
                 ],
 
                 // Operasional jaringan
@@ -196,6 +216,9 @@ class AccessControlSeeder extends Seeder
                     'olt.test',
 
                     'location.track',
+
+                    'router-mikrotik.view',
+                    'router-mikrotik.show'
                 ],
 
                 // Customer Care
