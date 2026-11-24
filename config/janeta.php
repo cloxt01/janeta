@@ -22,11 +22,11 @@ return [
     'alarm_interval' => (int) env('JANETA_ALARM_INTERVAL', 60),
     'alarm_threshold' => (int) env('JANETA_ALARM_LOS_THRESHOLD', 8),
     'alarm_chat_id' => env('JANETA_ALARM_CHAT_ID'),
-    
+
     'ssh_timeout' => (int) env('OLT_SSH_TIMEOUT', 10),
     'ssh_max_sessions' => (int) env('OLT_SSH_SESSION', 3),
-    'ssh_session_wait' => (int) env('OLT_SSH_SESSION_WAIT', 120),
-    'ssh_session_lock_ttl' => (int) env('OLT_SSH_SESSION_TTL', 360),
+    'ssh_session_wait' => (int) env('OLT_SSH_SESSION_WAIT', 60),
+    'ssh_session_lock_ttl' => (int) env('OLT_SSH_SESSION_TTL', 120),
 
     'snmp_timeout' => (int) env('OLT_SNMP_TIMEOUT', 3000000),
     'snmp_retries' => (int) env('OLT_SNMP_RETRIES', 2),
