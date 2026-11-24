@@ -791,7 +791,7 @@ class OltService
             'info' => $info,
         ];
     }
-    private function details(array $data): array
+    private function details(array $data, ?string $info = null): array
     {
         $info ??= $this->command(
             $data['olt'],
@@ -2045,9 +2045,7 @@ class OltService
         $alarms = [];
         $ports = [];
 
-        $monitorConfig = config('janeta.monitor_ports', []);
-
-        foreach ($monitorConfig as $olt => $config) {
+        foreach (config('janeta.monitor_ports', []) as $olt => $config) {
             foreach (($config['slots'] ?? []) as $slot) {
                 foreach (($config['ports'] ?? []) as $port) {
                     $ports[] = [
@@ -2060,193 +2058,151 @@ class OltService
             }
         }
 
-        $this->debug('ssh.alarms_scan.ports', [
-            'total_ports' => count($ports),
-        ]);
+        $this->debug('ssh.alarms_scan.ports', ['total_ports' => count($ports)]);
 
-        foreach ($ports as $portInfo) {
-            $olt = $portInfo['olt'];
-            $frame = (string) $portInfo['frame'];
-            $slot = (string) $portInfo['slot'];
-            $port = (string) $portInfo['port'];
+        try {
+            foreach ($ports as $portInfo) {
+                $olt = $portInfo['olt'];
+                $frame = (string) $portInfo['frame'];
+                $slot = (string) $portInfo['slot'];
+                $port = (string) $portInfo['port'];
+                $coordinate = "{$frame}/{$slot}/{$port}";
 
-            $coordinate = "{$frame}/{$slot}/{$port}";
+                // Hasil detail ONT offline dari scan sebelumnya: [ontId => ['sn' => ..., 'alarm' => array|null]]
+                $cacheKey = "olt:alarm-offline:{$olt}:{$coordinate}";
+                $previous = Cache::get($cacheKey, []);
+                $current = [];
 
-            try {
-                $raw = $this->command(
-                    $olt,
-                    "display ont info {$frame} {$slot} {$port} all"
-                ) ?? '';
+                try {
+                    $raw = $this->command($olt, "display ont info {$frame} {$slot} {$port} all") ?? '';
 
-                if (trim($raw) === '') {
-                    continue;
-                }
-
-                $raw = str_replace(["\r\n", "\r"], "\n", $raw);
-
-                foreach (explode("\n", $raw) as $line) {
-                    /*
-                    * Format tabel Huawei:
-                    * F/S/P ONT-ID SN Control-flag Run-state ...
-                    *
-                    * Contoh:
-                    * 0/ 5/13  31  48575443198554B0 active offline ...
-                    */
-                    if (!preg_match(
-                        '/^\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s+(\d+)\s+[A-Fa-f0-9]{12,20}\s+(active|deactivated)\s+(online|offline)\b/i',
-                        $line,
-                        $match
-                    )) {
+                    if (trim($raw) === '') {
                         continue;
                     }
 
-                    $ontId = $match[1];
-                    $controlFlag = strtolower($match[2]);
-                    $state = strtolower($match[3]);
+                    $raw = str_replace(["\r\n", "\r"], "\n", $raw);
 
-                    // Jangan hitung ONT yang dinonaktifkan.
-                    if ($controlFlag !== 'active') {
-                        continue;
-                    }
-
-                    // Hanya periksa ONT yang sedang offline.
-                    if ($state !== 'offline') {
-                        continue;
-                    }
-
-                    $detail = $this->command(
-                        $olt,
-                        "display ont info {$frame} {$slot} {$port} {$ontId}"
-                    ) ?? '';
-
-                    if (trim($detail) === '') {
-                        continue;
-                    }
-
-                    $detail = str_replace(
-                        ["\r\n", "\r"],
-                        "\n",
-                        $detail
-                    );
-
-                    // Pastikan control flag masih active dari detail ONT.
-                    if (preg_match(
-                        '/^\s*Control flag\s*:\s*(\S+)/mi',
-                        $detail,
-                        $controlMatch
-                    )) {
-                        if (strtolower(trim($controlMatch[1])) !== 'active') {
+                    foreach (explode("\n", $raw) as $line) {
+                        if (!preg_match(
+                            '/^\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s+(\d+)\s+([A-Fa-f0-9]{12,20})\s+(active|deactive\w*)\s+(online|offline)\b/i',
+                            $line,
+                            $match
+                        )) {
                             continue;
                         }
-                    }
 
-                    // Ambil Last down cause.
-                    preg_match(
-                        '/^\s*Last down cause\s*:\s*([^\r\n]+)/mi',
-                        $detail,
-                        $causeMatch
-                    );
+                        $ontId = $match[1];
+                        $sn = strtoupper($match[2]);
+                        $controlFlag = strtolower($match[3]);
+                        $state = strtolower($match[4]);
 
-                    // Last down time opsional, bukan syarat alarm.
-                    preg_match(
-                        '/^\s*Last down time\s*:\s*([^\r\n]+)/mi',
-                        $detail,
-                        $timeMatch
-                    );
+                        if ($controlFlag !== 'active' || $state !== 'offline') {
+                            continue;
+                        }
 
-                    // Ambil Equipment ID jika tersedia.
-                    preg_match(
-                        '/^\s*Equipment ID\s*:\s*([^\r\n]+)/mi',
-                        $detail,
-                        $equipmentMatch
-                    );
+                        // ONT yang sama (SN sama) dan masih offline: pakai hasil lama, tanpa command.
+                        if (isset($previous[$ontId]) && $previous[$ontId]['sn'] === $sn) {
+                            $current[$ontId] = $previous[$ontId];
 
-                    $cause = trim($causeMatch[1] ?? '');
-                    $causeLower = strtolower($cause);
+                            if ($previous[$ontId]['alarm'] !== null) {
+                                $alarms[] = $previous[$ontId]['alarm'];
+                            }
 
-                    $type = match (true) {
+                            continue;
+                        }
 
-                        // NONAKTIFKAN ALARM DYING GASP
-                        // ----------------------------------
-                        // str_contains($causeLower, 'dying-gasp'),
-                        // str_contains($causeLower, 'dying gasp'),
-                        // str_contains($causeLower, 'dyinggasp')
-                            // => 'DYING-GASP',
+                        $detail = $this->command(
+                            $olt,
+                            "display ont info {$frame} {$slot} {$port} {$ontId}"
+                        ) ?? '';
 
-                        str_contains($causeLower, 'los'),
-                        str_contains($causeLower, 'lob')
-                            => 'LOS',
+                        if (trim($detail) === '') {
+                            continue;
+                        }
 
-                        default => 'OTHER',
-                    };
+                        $detail = str_replace(["\r\n", "\r"], "\n", $detail);
 
-                    // Abaikan offline yang bukan LOS atau Dying Gasp.
-                    if ($type === 'OTHER' || $type !== 'LOS') {
-                        $this->debug('ssh.alarms_scan.ignored', [
+                        if (preg_match('/^\s*Control flag\s*:\s*(\S+)/mi', $detail, $controlMatch)
+                            && strtolower(trim($controlMatch[1])) !== 'active') {
+                            continue;
+                        }
+
+                        preg_match('/^\s*Last down cause\s*:\s*([^\r\n]+)/mi', $detail, $causeMatch);
+                        preg_match('/^\s*Last down time\s*:\s*([^\r\n]+)/mi', $detail, $timeMatch);
+                        preg_match('/^\s*Equipment ID\s*:\s*([^\r\n]+)/mi', $detail, $equipmentMatch);
+
+                        $cause = trim($causeMatch[1] ?? '');
+                        $causeLower = strtolower($cause);
+
+                        // Hanya LOS/LOB yang jadi alarm. Dying-gasp dan lainnya disimpan sebagai "bukan alarm".
+                        $isLos = str_contains($causeLower, 'los') || str_contains($causeLower, 'lob');
+
+                        if (!$isLos) {
+                            $current[$ontId] = ['sn' => $sn, 'alarm' => null];
+
+                            $this->debug('ssh.alarms_scan.ignored', [
+                                'olt' => $olt,
+                                'port' => $coordinate,
+                                'ont_id' => $ontId,
+                                'cause' => $cause,
+                            ]);
+
+                            continue;
+                        }
+
+                        $dateTime = trim($timeMatch[1] ?? '');
+
+                        $alarm = [
+                            'olt' => $olt,
+                            'alarmSn' => "{$coordinate}:{$ontId}:LOS",
+                            'dateTime' => $dateTime,
+                            'type' => 'LOS',
+                            'frame' => $frame,
+                            'slot' => $slot,
+                            'port' => $port,
+                            'ontId' => $ontId,
+                            'controlFlag' => $controlFlag,
+                            'runState' => $state,
+                            'equipmentId' => trim($equipmentMatch[1] ?? '-'),
+                            'alarmName' => $cause,
+                            'lastDownCause' => $cause,
+                        ];
+
+                        $alarms[] = $alarm;
+                        $current[$ontId] = ['sn' => $sn, 'alarm' => $alarm];
+
+                        $this->debug('ssh.alarms_scan.ont_detected', [
                             'olt' => $olt,
                             'port' => $coordinate,
                             'ont_id' => $ontId,
                             'cause' => $cause,
+                            'last_down_time' => $dateTime ?: null,
                         ]);
-
-                        continue;
                     }
 
-                    $dateTime = trim($timeMatch[1] ?? '');
-
-                    $alarm = [
-                        'olt' => $olt,
-                        'alarmSn' => "{$coordinate}:{$ontId}:{$type}",
-                        'dateTime' => $dateTime,
-                        'type' => $type,
-                        'frame' => $frame,
-                        'slot' => $slot,
-                        'port' => $port,
-                        'ontId' => $ontId,
-                        'controlFlag' => $controlFlag,
-                        'runState' => $state,
-                        'equipmentId' => trim($equipmentMatch[1] ?? '-'),
-                        'alarmName' => $cause,
-                        'lastDownCause' => $cause,
-                    ];
-
-                    $alarms[] = $alarm;
-
-                    $this->debug('ssh.alarms_scan.ont_detected', [
+                    // Simpan hanya kalau port ini berhasil dibaca sampai habis.
+                    Cache::put($cacheKey, $current, now()->addHours(2));
+                } catch (\Throwable $e) {
+                    $this->debug('ssh.alarms_scan.failed', [
                         'olt' => $olt,
                         'port' => $coordinate,
-                        'ont_id' => $ontId,
-                        'type' => $type,
-                        'cause' => $cause,
-                        'last_down_time' => $dateTime ?: null,
+                        'error' => $e->getMessage(),
                     ]);
                 }
-            } catch (\Throwable $e) {
-                $this->debug('ssh.alarms_scan.failed', [
-                    'olt' => $olt,
-                    'port' => $coordinate,
-                    'error' => $e->getMessage(),
-                ]);
-            } finally {
-                $this->close($olt);
+                // Tidak ada close() per port: sesi dipakai ulang.
+            }
+        } finally {
+            // Tutup sesi sekali setelah semua port selesai.
+            foreach (array_unique(array_column($ports, 'olt')) as $oltName) {
+                $this->close($oltName);
             }
         }
 
-        // Hilangkan duplikat berdasarkan OLT, port, dan ONT.
         $unique = [];
-
         foreach ($alarms as $alarm) {
-            $key = implode(':', [
-                $alarm['olt'],
-                $alarm['frame'],
-                $alarm['slot'],
-                $alarm['port'],
-                $alarm['ontId'],
-            ]);
-
+            $key = implode(':', [$alarm['olt'], $alarm['frame'], $alarm['slot'], $alarm['port'], $alarm['ontId']]);
             $unique[$key] = $alarm;
         }
-
         $alarms = array_values($unique);
 
         $this->debug('ssh.alarms_scan.completed', [
