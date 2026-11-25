@@ -70,6 +70,25 @@ class ProcessOltServices implements ShouldQueue
         ];
     }
 
+    private function sanitizeUtf8(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            return array_map(fn ($v) => $this->sanitizeUtf8($v), $value);
+        }
+
+        if (is_string($value)) {
+            // Byte invalid diganti '?'
+            $value = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+
+            // Buang ANSI escape dan control char (kecuali \n \r \t)
+            $value = preg_replace('/\x1B\[[0-9;]*[A-Za-z]/', '', $value) ?? $value;
+            $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $value) ?? $value;
+
+            return $value;
+        }
+
+        return $value;
+    }
     public function handle(OltService $service, TelegramClient $telegram): void
     {
         $task = OltServiceRequest::findOrFail($this->requestId);
@@ -117,6 +136,8 @@ class ProcessOltServices implements ShouldQueue
                 ),
             };
 
+            $result = $this->sanitizeUtf8($result);
+
             $duration = (int) round((microtime(true) - $startedAt) * 1000);
 
             $task->update([
@@ -138,9 +159,10 @@ class ProcessOltServices implements ShouldQueue
         } catch (Throwable $e) {
             $duration = (int) round((microtime(true) - $startedAt) * 1000);
 
+            $errorMessage = $this->sanitizeUtf8($e->getMessage());
             $task->update([
                 'status' => 'failed',
-                'error' => $e->getMessage(),
+                'error' => $errorMessage,
                 'duration_ms' => $duration,
                 'finished_at' => now(),
             ]);
