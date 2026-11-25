@@ -16,7 +16,7 @@
     <meta property="og:title" content="@yield('title', 'JANETA - JangkauNet NetOps Assistant')">
     <meta property="og:description" content="@yield('description', 'Aplikasi internal JangkauNet untuk operasional manajemen jaringan dan perangkat.')">
     <meta property="og:url" content="{{ url()->current() }}">
-    <meta property="og:image" content="{{ asset('og-image.png') }}?v=1">
+    <meta property="og:image" content="{{ asset('og-image.jpg') }}?v=1">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:locale" content="id_ID">
