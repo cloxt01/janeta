@@ -9,3 +9,5 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('janeta:collect-snmp')->everyFiveMinutes()->withoutOverlapping()->appendOutputTo(storage_path('logs/collect-snmp.log'));;
+Schedule::command('janeta:mikrotik-logs')
+    ->everyFiveSeconds();

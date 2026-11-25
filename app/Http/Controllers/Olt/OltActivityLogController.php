@@ -1,10 +1,11 @@
 <?php
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Olt;
 
+use App\Http\Controllers\Controller;
 use App\Models\OltServiceRequest;
 use App\Support\OltActivityPresenter;
 
-class OltActivityController extends Controller
+class OltActivityLogController extends Controller
 {
     public function index()
     {

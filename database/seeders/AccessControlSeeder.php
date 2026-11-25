@@ -35,13 +35,18 @@ class AccessControlSeeder extends Seeder
                     'ont.deactivate' => 'Nonaktifkan ONT',
                 ],
 
+                'Activity' => [
+                    'olt.activity.view'      => 'Melihat Aktivitas OLT',
+                    'mikrotik.activity.view' => 'Melihat Aktivitas MikroTik',
+                    'audit.view'             => 'Melihat Audit Logs',
+                ],
+
                 'OLT' => [
-                    'olt.activity.view' => 'Melihat Aktivitas OLT',
-                    'olt.view'           => 'Melihat OLT',
-                    'olt.create'         => 'Menambahkan OLT',
-                    'olt.update'         => 'Mengubah OLT',
-                    'olt.delete'         => 'Menghapus OLT',
-                    'olt.test'           => 'Testing Koneksi OLT',
+                    'olt.view'   => 'Melihat OLT',
+                    'olt.create' => 'Menambahkan OLT',
+                    'olt.update' => 'Mengubah OLT',
+                    'olt.delete' => 'Menghapus OLT',
+                    'olt.test'   => 'Testing Koneksi OLT',
                 ],
 
                 'Telegram' => [
@@ -54,10 +59,6 @@ class AccessControlSeeder extends Seeder
                     'users.create' => 'Menambahkan Pengguna',
                     'users.update' => 'Mengubah Pengguna',
                     'users.delete' => 'Menghapus Pengguna',
-                ],
-
-                'Audit' => [
-                    'audit.view' => 'Melihat Audit Logs',
                 ],
 
                 'Access Control' => [
@@ -81,7 +82,6 @@ class AccessControlSeeder extends Seeder
                     'router-mikrotik.test'    => 'Testing Koneksi Router MikroTik',
                 ],
 
-
             ];
 
             $permissionIds = [];
@@ -93,8 +93,8 @@ class AccessControlSeeder extends Seeder
                         ['name' => $name],
                         [
                             'display_name' => $displayName,
-                            'module' => $module,
-                            'description' => $displayName,
+                            'module'       => $module,
+                            'description'  => $displayName,
                         ]
                     );
 
@@ -113,28 +113,29 @@ class AccessControlSeeder extends Seeder
 
                 'super-admin' => [
                     'display_name' => 'Super Admin',
-                    'description' => 'Memiliki seluruh hak akses JANETA.',
+                    'description'  => 'Memiliki seluruh hak akses JANETA.',
                 ],
 
                 'admin' => [
                     'display_name' => 'Admin',
-                    'description' => 'Mengelola operasional dan pengguna JANETA.',
+                    'description'  => 'Mengelola operasional dan pengguna JANETA.',
                 ],
 
                 'operator' => [
                     'display_name' => 'Operator',
-                    'description' => 'Mengelola operasional OLT dan ONT.',
+                    'description'  => 'Mengelola operasional OLT dan ONT.',
                 ],
 
                 'customer-care' => [
                     'display_name' => 'Customer Care',
-                    'description' => 'Mengakses informasi pelanggan dan ONT.',
+                    'description'  => 'Mengakses informasi pelanggan dan ONT.',
                 ],
 
                 'viewer' => [
                     'display_name' => 'Viewer',
-                    'description' => 'Hanya memiliki hak akses melihat data.',
+                    'description'  => 'Hanya memiliki hak akses melihat data.',
                 ],
+
             ];
 
             $roleModels = [];
@@ -164,6 +165,7 @@ class AccessControlSeeder extends Seeder
                 'admin' => [
                     'dashboard.view',
 
+                    // ONT
                     'ont.lookup',
                     'ont.processing',
                     'ont.control',
@@ -171,28 +173,36 @@ class AccessControlSeeder extends Seeder
                     'ont.activate',
                     'ont.deactivate',
 
+                    // Activity
                     'olt.activity.view',
+                    'mikrotik.activity.view',
+                    'audit.view',
+
+                    // OLT Management
                     'olt.view',
                     'olt.create',
                     'olt.update',
                     'olt.delete',
                     'olt.test',
 
+                    // Telegram
                     'telegram.view',
                     'telegram.manage',
 
+                    // Users
                     'users.view',
                     'users.create',
                     'users.update',
                     'users.delete',
 
-                    'audit.view',
-
+                    // Access Control
                     'access.view',
                     'access.manage',
 
+                    // Location
                     'location.track',
 
+                    // MikroTik Management
                     'router-mikrotik.view',
                     'router-mikrotik.show',
                     'router-mikrotik.store',
@@ -206,19 +216,26 @@ class AccessControlSeeder extends Seeder
                 'operator' => [
                     'dashboard.view',
 
+                    // ONT
                     'ont.lookup',
                     'ont.processing',
                     'ont.control',
                     'ont.restart',
 
+                    // Activity
                     'olt.activity.view',
+                    'mikrotik.activity.view',
+
+                    // OLT
                     'olt.view',
                     'olt.test',
 
+                    // Location
                     'location.track',
 
+                    // MikroTik
                     'router-mikrotik.view',
-                    'router-mikrotik.show'
+                    'router-mikrotik.show',
                 ],
 
                 // Customer Care
@@ -235,18 +252,35 @@ class AccessControlSeeder extends Seeder
                     'dashboard.view',
                     'ont.lookup',
                     'ont.processing',
-                    'olt.view',
+
+                    // Activity
                     'olt.activity.view',
+
+                    // OLT
+                    'olt.view',
+
+                    // Telegram
                     'telegram.view',
 
+                    // Location
                     'location.track',
                 ],
+
             ];
 
             foreach ($rolePermissions as $roleName => $permissions) {
 
                 $ids = collect($permissions)
-                    ->map(fn ($permission) => $permissionIds[$permission])
+                    ->map(function ($permission) use ($permissionIds) {
+
+                        if (!isset($permissionIds[$permission])) {
+                            throw new \RuntimeException(
+                                "Permission {$permission} belum terdaftar di AccessControlSeeder."
+                            );
+                        }
+
+                        return $permissionIds[$permission];
+                    })
                     ->all();
 
                 $roleModels[$roleName]

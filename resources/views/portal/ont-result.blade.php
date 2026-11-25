@@ -326,8 +326,8 @@
 
                     <div class="ld-grid">
                         <div class="ld-table">
-                            <div class="ld-l">1490nm · ONT RX</div><div class="ld-v ld-{{ $gDown }}">{{ $ontRx !== null ? $fmt($ontRx) . ' dBm' : '-' }}</div>
-                            <div class="ld-l">1310nm · OLT RX</div><div class="ld-v ld-{{ $gUp }}">{{ $oltRx !== null ? $fmt($oltRx) . ' dBm' : '-' }}</div>
+                            <div class="ld-l">ONT RX</div><div class="ld-v ld-{{ $gDown }}">{{ $ontRx !== null ? $fmt($ontRx) . ' dBm' : '-' }}</div>
+                            <div class="ld-l">OLT RX</div><div class="ld-v ld-{{ $gUp }}">{{ $oltRx !== null ? $fmt($oltRx) . ' dBm' : '-' }}</div>
                             <div class="ld-l">ONT TX</div><div class="ld-v">{{ $ontTx !== null ? $fmt($ontTx) . ' dBm' : '-' }}</div>
                             <div class="ld-l">OLT TX</div><div class="ld-v">{{ $oltTx !== null ? $fmt($oltTx) . ' dBm' : '-' }}</div>
                         </div>

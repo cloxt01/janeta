@@ -601,21 +601,47 @@
         [
             'label' => 'Tools',
             'icon'  => 'wrench',
-            'match' => ['olt-activity', 'olts.ports'],
+            'match' => ['olts.ports'],
             'children' => [
-                [
-                    'label' => 'OLT Activity',
-                    'icon'  => 'network',
-                    'route' => 'olt-activity',
-                    'match' => ['olt-activity'],
-                    'can'   => $can('olt.activity.view'),
-                ],
+
                 [
                     'label' => 'Port Monitor',
                     'icon'  => 'activity',
                     'route' => 'olts.ports',
                     'match' => ['olts.ports'],
                     'can'   => $can('olt.view'),
+                ],
+            ],
+        ],
+        [
+            'label' => 'Activity',
+            'icon'  => 'activity',
+            'match' => [
+                'olt-activity',
+                'router-activity',
+                'audit-logs',
+            ],
+            'children' => [
+                [
+                    'label' => 'OLT Activity',
+                    'icon'  => 'server',
+                    'route' => 'olt-activity',
+                    'match' => ['olt-activity'],
+                    'can'   => $can('olt.activity.view'),
+                ],
+                [
+                    'label' => 'MikroTik Activity',
+                    'icon'  => 'router',
+                    'route' => 'router-activity',
+                    'match' => ['router-activity'],
+                    'can'   => $can('mikrotik.activity.view'),
+                ],
+                [
+                    'label' => 'Audit Log',
+                    'icon'  => 'shield-check',
+                    'route' => 'audit-logs',
+                    'match' => ['audit-logs'],
+                    'can'   => $can('audit.view'),
                 ],
             ],
         ],
@@ -646,13 +672,6 @@
                     'can'   => $can('location.view'),
                 ],
                 [
-                    'label' => 'Audit Log',
-                    'icon'  => 'scroll-text',
-                    'route' => 'audit-logs',
-                    'match' => ['audit-logs'],
-                    'can'   => $can('audit.view'),
-                ],
-                [
                     'label' => 'Access Control',
                     'icon'  => 'shield-check',
                     'route' => 'access.index',
@@ -678,6 +697,7 @@
     };
 
     $isActive = fn (array $item) => request()->routeIs(...$item['match']);
+
 
     $menu     = $filterMenu($menu);
     $canTrack = $can('location.track');

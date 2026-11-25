@@ -1,16 +1,17 @@
 <?php
 
-use App\Http\Controllers\WhitelistController;
-use App\Http\Controllers\UserController;
-use App\Http\Controllers\AuditController;
-use App\Http\Controllers\LocationAdminController;
-use App\Http\Controllers\Router\MikrotikController;
-use App\Http\Controllers\UserLocationController;
-use App\Http\Controllers\OntController;
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\OltController;
-use App\Http\Controllers\OltActivityController;
 use App\Http\Controllers\AccessControlController;
+use App\Http\Controllers\AuditController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\LocationAdminController;
+use App\Http\Controllers\Olt\OltActivityLogController;
+use App\Http\Controllers\OltController;
+use App\Http\Controllers\OntController;
+use App\Http\Controllers\Router\MikrotikActivityLogController;
+use App\Http\Controllers\Router\MikrotikController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\UserLocationController;
+use App\Http\Controllers\WhitelistController;
 
 // Root
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -94,14 +95,21 @@ Route::middleware('auth')->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | OLT ACTIVITY
+    | ACTIVITY
     |--------------------------------------------------------------------------
     */
 
-    Route::get('/dashboard/olt-activity', [OltActivityController::class, 'index'])
+    Route::get('/dashboard/olt-activity', [OltActivityLogController::class, 'index'])
         ->middleware('permission:olt.activity.view')
         ->name('olt-activity');
 
+    Route::get('/dashboard/mikrotik-activity', [MikrotikActivityLogController::class, 'index'])
+        ->middleware('permission:mikrotik.activity.view')
+        ->name('router-activity');
+
+    Route::get('/dashboard/audit-logs', [AuditController::class, 'logs'])
+        ->middleware('permission:audit.view')
+        ->name('audit-logs');
 
     /*
     |--------------------------------------------------------------------------
@@ -228,15 +236,6 @@ Route::middleware('auth')->group(function () {
         });
 
 
-    /*
-    |--------------------------------------------------------------------------
-    | AUDIT LOGS
-    |--------------------------------------------------------------------------
-    */
-
-    Route::get('/dashboard/audit-logs', [AuditController::class, 'logs'])
-        ->middleware('permission:audit.view')
-        ->name('audit-logs');
 
 
     /*

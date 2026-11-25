@@ -10,6 +10,11 @@ Broadcast::channel('olt-activity', function ($user) {
     return $user->isAdmin();
 });
 
+
+
+Broadcast::channel('mikrotik.activity', function ($user) {
+    return $user->isAdmin();
+});
 Broadcast::channel('location-monitoring', function ($user) {
     return $user->hasPermission('location.view');
 });
