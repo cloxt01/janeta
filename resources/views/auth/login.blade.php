@@ -4,7 +4,32 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Masuk · Janeta</title>
+
+
+    <meta name="description" content="@yield('description', 'JANETA (JangkauNet NetOps Assistant): aplikasi internal untuk mendukung operasional manajemen jaringan dan perangkat.')">
+    <meta name="robots" content="noindex, nofollow">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="JANETA">
+    <meta property="og:title" content="@yield('title', 'JANETA - JangkauNet NetOps Assistant')">
+    <meta property="og:description" content="@yield('description', 'Aplikasi internal JangkauNet untuk operasional manajemen jaringan dan perangkat.')">
+    <meta property="og:url" content="{{ url()->current() }}">
+    <meta property="og:image" content="{{ asset('og-image.jpg') }}?v=1">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:locale" content="id_ID">
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="@yield('title', 'JANETA - JangkauNet NetOps Assistant')">
+    <meta name="twitter:description" content="@yield('description', 'Aplikasi internal JangkauNet untuk operasional manajemen jaringan dan perangkat.')">
+    <meta name="twitter:image" content="{{ asset('favicon.png') }}?v=1">
+
+    <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}?v=2">
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+
+
     <style>
         .login-page { background: #08090C; color: #f8fafc; }
         .login-card { width: min(100%, 320px); }
