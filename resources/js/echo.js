@@ -15,7 +15,8 @@ const config = {
     wssPort: Number(import.meta.env.VITE_REVERB_PORT ?? 443),
 
     forceTLS: isSecure,
-    enabledTransports: isSecure ? ['wss'] : ['ws'],
+    enabledTransports: ['ws', 'wss'],
+    disableStats: true,
 };
 
 console.log('[JANETA] Reverb configuration:', {
@@ -31,18 +32,10 @@ console.log('[JANETA] Echo initialized');
 
 const connection = window.Echo.connector.pusher.connection;
 
-connection.bind('connected', () => {
-    console.log('[JANETA] Reverb connected');
-});
-
-connection.bind('connecting', () => {
-    console.log('[JANETA] Connecting to Reverb...');
-});
-
-connection.bind('disconnected', () => {
-    console.warn('[JANETA] Reverb disconnected');
-});
-
-connection.bind('error', (error) => {
-    console.error('[JANETA] Reverb connection error:', error);
-});
+connection.bind('state_change', (s) => console.log('[JANETA] state:', s.previous, '->', s.current));
+connection.bind('connected', () => console.log('[JANETA] Reverb connected'));
+connection.bind('connecting', () => console.log('[JANETA] Connecting to Reverb...'));
+connection.bind('disconnected', () => console.warn('[JANETA] Reverb disconnected'));
+connection.bind('unavailable', () => console.warn('[JANETA] Reverb unavailable'));
+connection.bind('failed', () => console.warn('[JANETA] Reverb failed'));
+connection.bind('error', (error) => console.error('[JANETA] Reverb connection error:', error));
