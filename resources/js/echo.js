@@ -1,14 +1,48 @@
 import Echo from 'laravel-echo';
-
 import Pusher from 'pusher-js';
+
 window.Pusher = Pusher;
 
-window.Echo = new Echo({
+const scheme = import.meta.env.VITE_REVERB_SCHEME ?? 'https';
+const isSecure = scheme === 'https';
+
+const config = {
     broadcaster: 'reverb',
     key: import.meta.env.VITE_REVERB_APP_KEY,
+
     wsHost: import.meta.env.VITE_REVERB_HOST,
-    wsPort: import.meta.env.VITE_REVERB_PORT ?? 80,
-    wssPort: import.meta.env.VITE_REVERB_PORT ?? 443,
-    forceTLS: (import.meta.env.VITE_REVERB_SCHEME ?? 'https') === 'https',
-    enabledTransports: (import.meta.env.VITE_REVERB_SCHEME === 'https') ? ['wss'] : ['ws'],
+    wsPort: Number(import.meta.env.VITE_REVERB_PORT ?? 80),
+    wssPort: Number(import.meta.env.VITE_REVERB_PORT ?? 443),
+
+    forceTLS: isSecure,
+    enabledTransports: isSecure ? ['wss'] : ['ws'],
+};
+
+console.log('[JANETA] Reverb configuration:', {
+    host: config.wsHost,
+    port: isSecure ? config.wssPort : config.wsPort,
+    scheme,
+    keyConfigured: Boolean(config.key),
+});
+
+window.Echo = new Echo(config);
+
+console.log('[JANETA] Echo initialized');
+
+const connection = window.Echo.connector.pusher.connection;
+
+connection.bind('connected', () => {
+    console.log('[JANETA] Reverb connected');
+});
+
+connection.bind('connecting', () => {
+    console.log('[JANETA] Connecting to Reverb...');
+});
+
+connection.bind('disconnected', () => {
+    console.warn('[JANETA] Reverb disconnected');
+});
+
+connection.bind('error', (error) => {
+    console.error('[JANETA] Reverb connection error:', error);
 });
