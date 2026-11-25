@@ -5,15 +5,37 @@ namespace App\Services\Router;
 use App\Models\MikrotikActivityLog;
 use App\Models\MikrotikRouter;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use RouterOS\Client as RouterOSClient;
 
 class MikrotikLogCollector
 {
+    protected MikrotikConnectionManager $connections;
+
+    public function __construct(
+        MikrotikConnectionManager $connections
+    ) {
+        $this->connections = $connections;
+    }
+
+    /**
+     * Mengambil persistent connection.
+     */
+    public function connectPersistent(
+        MikrotikRouter $device
+    ): RouterOSClient {
+        return $this->connections->get(
+            $device,
+            fn (): RouterOSClient => $this->connect($device)
+        );
+    }
+
     /**
      * Membuat koneksi RouterOS API.
      */
-    protected function connect(MikrotikRouter $device): RouterOSClient
-    {
+    protected function connect(
+        MikrotikRouter $device
+    ): RouterOSClient {
         if (! $device->is_active) {
             throw new \RuntimeException(
                 "Router {$device->name} sedang dinonaktifkan."
@@ -61,19 +83,12 @@ class MikrotikLogCollector
         ]);
     }
 
-    protected function isJanetaUser(?string $username, string $apiUsername): bool
-    {
-        if (! filled($username) || ! filled($apiUsername)) {
-            return false;
-        }
-
-        return strcasecmp(trim($username), trim($apiUsername)) === 0;
-    }
     /**
      * Mendapatkan username API JANETA.
      */
-    protected function getApiUsername(MikrotikRouter $device): string
-    {
+    protected function getApiUsername(
+        MikrotikRouter $device
+    ): string {
         return trim(
             filled($device->api_username)
                 ? $device->api_username
@@ -82,10 +97,31 @@ class MikrotikLogCollector
     }
 
     /**
+     * Memeriksa apakah username merupakan akun API JANETA.
+     */
+    protected function isJanetaUser(
+        ?string $username,
+        string $apiUsername
+    ): bool {
+        if (
+            ! filled($username) ||
+            ! filled($apiUsername)
+        ) {
+            return false;
+        }
+
+        return strcasecmp(
+                trim($username),
+                trim($apiUsername)
+            ) === 0;
+    }
+
+    /**
      * Mengambil informasi waktu RouterOS.
      */
-    protected function getRouterClock(RouterOSClient $client): array
-    {
+    protected function getRouterClock(
+        RouterOSClient $client
+    ): array {
         $response = $client
             ->query('/system/clock/print')
             ->read();
@@ -102,7 +138,10 @@ class MikrotikLogCollector
             $clock['time-zone-name'] ?? ''
         );
 
-        if (! $date || ! preg_match('/^\d{1,2}:\d{2}:\d{2}$/', $time)) {
+        if (
+            ! $date ||
+            ! preg_match('/^\d{1,2}:\d{2}:\d{2}$/', $time)
+        ) {
             throw new \RuntimeException(
                 'Gagal membaca tanggal atau waktu dari MikroTik.'
             );
@@ -118,8 +157,9 @@ class MikrotikLogCollector
     /**
      * Mengubah tanggal RouterOS menjadi Y-m-d.
      */
-    protected function normalizeRouterDate(string $date): ?string
-    {
+    protected function normalizeRouterDate(
+        string $date
+    ): ?string {
         $date = trim($date);
 
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
@@ -186,7 +226,7 @@ class MikrotikLogCollector
 
         $date = $clock['date'];
 
-        // Format tanggal ISO + jam.
+        // Format ISO: 2026-11-25 09:15:22.
         if (preg_match(
             '/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}:\d{2})$/',
             $rawTime,
@@ -224,8 +264,6 @@ class MikrotikLogCollector
                 $candidateDate = Carbon::parse($candidate);
                 $routerDate = Carbon::parse($clock['date']);
 
-                // Jika tanggal berada jauh di masa depan,
-                // kemungkinan aktivitas berasal dari tahun sebelumnya.
                 if ($candidateDate->gt($routerDate->copy()->addDays(1))) {
                     $candidate = $candidateDate
                         ->subYear()
@@ -256,7 +294,11 @@ class MikrotikLogCollector
                 'UTC'
             );
 
-            if ($eventTime && $currentTime && $eventTime->gt($currentTime)) {
+            if (
+                $eventTime &&
+                $currentTime &&
+                $eventTime->gt($currentTime)
+            ) {
                 $date = Carbon::parse($date)
                     ->subDay()
                     ->format('Y-m-d');
@@ -275,11 +317,74 @@ class MikrotikLogCollector
     }
 
     /**
-     * Mengumpulkan log dan system history RouterOS.
+     * Memisahkan topic RouterOS.
+     *
+     * Topic asli tetap dipertahankan untuk database.
      */
-    public function collect(MikrotikRouter $device): array
+    protected function parseTopics(string $topics): array
     {
-        $client = $this->connect($device);
+        return array_values(array_unique(array_filter(
+            array_map(
+                'trim',
+                explode(',', strtolower($topics))
+            ),
+            fn ($topic) => $topic !== ''
+        )));
+    }
+
+    /**
+     * Mengekstrak username dari pesan log.
+     */
+    protected function extractUser(
+        string $message
+    ): ?string {
+        $patterns = [
+            '/\buser\s+([^\s]+)\s+/i',
+            '/^([^\s]+)\s+logged\s+(?:in|out)\b/i',
+            '/\bby\s+([^\s]+)/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $message, $matches)) {
+                return trim($matches[1], " \t\n\r\0\x0B\"'");
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Membentuk pesan dari System History.
+     */
+    protected function historyMessage(
+        array $entry
+    ): string {
+        $parts = [];
+
+        foreach ([
+                     'action',
+                     'undo',
+                     'redo',
+                     'proplist',
+                     'policy',
+                 ] as $field) {
+            if (filled($entry[$field] ?? null)) {
+                $parts[] = $field . ': ' . $entry[$field];
+            }
+        }
+
+        return implode(' | ', $parts)
+            ?: 'Perubahan konfigurasi tercatat di System History.';
+    }
+
+    /**
+     * Mengumpulkan log RouterOS dan System History.
+     */
+    public function collect(
+        MikrotikRouter $device,
+        ?RouterOSClient $client = null
+    ): array {
+        $client ??= $this->connectPersistent($device);
 
         $apiUsername = $this->getApiUsername($device);
 
@@ -292,6 +397,7 @@ class MikrotikLogCollector
             'account' => 0,
             'history' => 0,
             'ignored_api' => 0,
+            'ignored_other' => 0,
         ];
 
         /*
@@ -307,19 +413,14 @@ class MikrotikLogCollector
         foreach ($logs as $log) {
             $topics = (string) ($log['topics'] ?? '');
 
-            // Simpan topic asli, parsing hanya untuk klasifikasi.
-            $topicList = array_unique(array_filter(
-                array_map(
-                    'trim',
-                    explode(',', strtolower($topics))
-                )
-            ));
+            $topicList = $this->parseTopics($topics);
 
             $isSystem = in_array('system', $topicList, true);
             $isAccount = in_array('account', $topicList, true);
 
-            // Hanya simpan log yang memiliki topic system/account.
+            // Abaikan log di luar kategori yang dibutuhkan.
             if (! $isSystem && ! $isAccount) {
+                $result['ignored_other']++;
                 continue;
             }
 
@@ -327,9 +428,26 @@ class MikrotikLogCollector
 
             $routerUser = $this->extractUser($message);
 
-            // Abaikan aktivitas account dari API JANETA.
-            if ($this->isJanetaUser($routerUser, $apiUsername)) {
+            /*
+             * Filter hanya berlaku untuk kategori account.
+             * Log system tetap disimpan.
+             */
+            $isJanetaAccount = $isAccount &&
+                $this->isJanetaUser(
+                    $routerUser,
+                    $apiUsername
+                );
+
+            if ($isJanetaAccount) {
                 $result['ignored_api']++;
+
+//                Log::debug('[JANETA] MikroTik API activity ignored', [
+//                    'router' => $device->name,
+//                    'topics' => $topics,
+//                    'message' => $message,
+//                    'extracted_user' => $routerUser,
+//                ]);
+
                 continue;
             }
 
@@ -340,12 +458,11 @@ class MikrotikLogCollector
                 $clock
             );
 
-            $routerTime = $rawRouterTime;
             $routerId = (string) ($log['.id'] ?? '');
 
             /*
              * Satu log bisa memiliki beberapa kategori.
-             * Contoh: system,account menghasilkan system + account.
+             * Contoh: system,account menghasilkan dua event.
              */
             $eventTypes = [];
 
@@ -361,7 +478,7 @@ class MikrotikLogCollector
                 $fingerprint = hash('sha256', implode('|', [
                     $device->id,
                     $routerId,
-                    $routerTime,
+                    $rawRouterTime,
                     $topics,
                     $message,
                     $eventType,
@@ -416,10 +533,14 @@ class MikrotikLogCollector
 
             $action = (string) ($entry['action'] ?? '');
 
-            $routerUser = trim((string) ($entry['by'] ?? ''));
+            $routerUser = trim(
+                (string) ($entry['by'] ?? '')
+            );
 
+            // Abaikan hanya aktivitas konfigurasi oleh akun API JANETA.
             if ($this->isJanetaUser($routerUser, $apiUsername)) {
                 $result['ignored_api']++;
+
                 continue;
             }
 
@@ -462,48 +583,5 @@ class MikrotikLogCollector
         }
 
         return $result;
-    }
-
-    /**
-     * Mengekstrak username dari pesan log.
-     */
-    protected function extractUser(string $message): ?string
-    {
-        $patterns = [
-            '/\buser\s+([^\s]+)\s+/i',
-            '/^([^\s]+)\s+logged\s+(?:in|out)\b/i',
-            '/\bby\s+([^\s]+)/i',
-        ];
-
-        foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $message, $matches)) {
-                return trim($matches[1]);
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Membentuk pesan dari System History.
-     */
-    protected function historyMessage(array $entry): string
-    {
-        $parts = [];
-
-        foreach ([
-                     'action',
-                     'undo',
-                     'redo',
-                     'proplist',
-                     'policy',
-                 ] as $field) {
-            if (filled($entry[$field] ?? null)) {
-                $parts[] = $field . ': ' . $entry[$field];
-            }
-        }
-
-        return implode(' | ', $parts)
-            ?: 'Perubahan konfigurasi tercatat di System History.';
     }
 }
