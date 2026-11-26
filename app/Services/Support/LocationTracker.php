@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Support;
 
 use App\Events\LocationStopped;
 use App\Events\LocationUpdated;

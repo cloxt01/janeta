@@ -92,7 +92,7 @@
             <p class="mt-1 text-sm text-slate-500">Pantau kesehatan port GPON dan distribusi ONT dari satu tampilan.</p>
         </div>
 
-        <form method="get" action="{{ route('olts.ports') }}" class="port-toolbar mb-5 grid gap-3 md:grid-cols-4">
+        <form method="get" action="{{ route('tools.port-monitor') }}" class="port-toolbar mb-5 grid gap-3 md:grid-cols-4">
             <label>Perangkat
                 <select name="olt" onchange="this.form.submit()">
                     @foreach($olts as $olt)<option value="{{ $olt->name }}" @selected($oltName === $olt->name)>{{ $olt->name }} · {{ $olt->host }}</option>@endforeach

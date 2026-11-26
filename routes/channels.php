@@ -7,11 +7,11 @@ Broadcast::channel('users.{userId}', function ($user, $userId) {
 });
 
 Broadcast::channel('olt-activity', function ($user) {
-    return $user->hasPermission('olt-activity.view');
+    return $user->hasPermission('activity.olt.view');
 });
 
 Broadcast::channel('mikrotik.activity', function ($user) {
-    return $user->hasPermission('mikrotik.activity.view');
+    return $user->hasPermission('activity.mikrotik.view');
 });
 Broadcast::channel('location-monitoring', function ($user) {
     return $user->hasPermission('location.view');

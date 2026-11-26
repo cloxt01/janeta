@@ -8,10 +8,12 @@ use App\Http\Controllers\Olt\OltActivityLogController;
 use App\Http\Controllers\OltController;
 use App\Http\Controllers\OntController;
 use App\Http\Controllers\PasswordController;
-use App\Http\Controllers\Router\MikrotikActivityLogController;
-use App\Http\Controllers\Router\MikrotikController;
-use App\Http\Controllers\UserController;
-use App\Http\Controllers\UserLocationController;
+use App\Http\Controllers\Router\Mikrotik\MikrotikActivityLogController;
+use App\Http\Controllers\Router\Mikrotik\MikrotikController;
+use App\Http\Controllers\ToolsController;
+use App\Http\Controllers\User\UserActivityLogController;
+use App\Http\Controllers\User\UserController;
+use App\Http\Controllers\User\UserLocationController;
 use App\Http\Controllers\WhitelistController;
 
 // Root
@@ -99,17 +101,17 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     */
 
-    Route::get('/dashboard/olt-activity', [OltActivityLogController::class, 'index'])
-        ->middleware('permission:olt.activity.view')
+    Route::get('/dashboard/activity/olt', [OltActivityLogController::class, 'index'])
+        ->middleware('permission:activity.olt.view')
         ->name('olt-activity');
 
-    Route::get('/dashboard/mikrotik-activity', [MikrotikActivityLogController::class, 'index'])
-        ->middleware('permission:mikrotik.activity.view')
+    Route::get('/dashboard/activity/mikrotik', [MikrotikActivityLogController::class, 'index'])
+        ->middleware('permission:activity.mikrotik.view')
         ->name('router-activity');
 
-    Route::get('/dashboard/audit-logs', [AuditController::class, 'logs'])
-        ->middleware('permission:audit.view')
-        ->name('audit-logs');
+    Route::get('/dashboard/activity/user', [UserActivityLogController::class, 'index'])
+        ->middleware('permission:activity.user.view')
+        ->name('user-activity');
 
     /*
     |--------------------------------------------------------------------------
@@ -146,6 +148,14 @@ Route::middleware('auth')->group(function () {
 
         });
 
+
+    Route::prefix('dashboard/tools')
+        ->name('tools.')
+        ->group(function () {
+            Route::get('/port-monitor', [ToolsController::class, 'portMonitor'])
+                ->middleware('permission:tools.port-monitor')
+                ->name('port-monitor');
+        });
     Route::prefix('dashboard/olts')
         ->name('olts.')
         ->group(function () {
@@ -154,9 +164,7 @@ Route::middleware('auth')->group(function () {
                 ->middleware('permission:olt.view')
                 ->name('index');
 
-            Route::get('/ports', [OltController::class, 'ports'])
-                ->middleware('permission:olt.view')
-                ->name('ports');
+
 
             Route::post('/', [OltController::class, 'store'])
                 ->middleware('permission:olt.create')
@@ -186,8 +194,8 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     */
 
-    Route::prefix('dashboard/whitelist')
-        ->name('whitelist.')
+    Route::prefix('dashboard/management/telegram')
+        ->name('telegram.whitelist.')
         ->group(function () {
 
             Route::get('/', [WhitelistController::class, 'index'])
@@ -243,7 +251,7 @@ Route::middleware('auth')->group(function () {
     Route::put('settings/profile/password', [PasswordController::class, 'update'])
         ->name('profile.password.update');
 
-    Route::put('/admin/users/{user}/password', [PasswordController::class, 'adminReset'])
+    Route::post('/admin/users/reset-password', [PasswordController::class, 'adminReset'])
         ->middleware('admin')
         ->name('admin.users.password.reset');
 

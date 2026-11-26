@@ -21,7 +21,7 @@ class WhitelistController extends Controller
      */
     public function index(): View
     {
-        return view('dashboard.whitelist', [
+        return view('dashboard.telegram.whitelist', [
             'entries' => WhitelistEntry::latest()->paginate(15),
         ]);
     }

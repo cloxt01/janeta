@@ -328,7 +328,7 @@
 
             <form
                 method="POST"
-                action="{{ route('whitelist.store') }}"
+                action="{{ route('telegram.whitelist.store') }}"
                 class="wl-add-form"
             >
                 @csrf
@@ -462,7 +462,7 @@
                                     <form
                                         id="update-{{ $entry->id }}"
                                         method="POST"
-                                        action="{{ route('whitelist.update', $entry) }}"
+                                        action="{{ route('telegram.whitelist.update', $entry) }}"
                                     >
                                         @csrf
                                         @method('PUT')
@@ -479,7 +479,7 @@
 
                                     <form
                                         method="POST"
-                                        action="{{ route('whitelist.destroy', $entry) }}"
+                                        action="{{ route('telegram.whitelist.destroy', $entry) }}"
                                         onsubmit="return confirm('Yakin ingin menghapus whitelist ini?')"
                                     >
                                         @csrf

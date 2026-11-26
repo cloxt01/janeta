@@ -746,7 +746,7 @@
             const modal = document.getElementById('resetPasswordModal');
             const form = document.getElementById('resetPasswordForm');
 
-            form.action = `/admin/users/${id}/password`;
+            form.action = `{{route('admin.users.password.reset')}}`;
 
             document.getElementById('resetUserName').textContent = name;
             document.getElementById('resetUserEmail').textContent = email;

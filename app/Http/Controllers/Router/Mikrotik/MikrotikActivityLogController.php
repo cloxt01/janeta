@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Router;
+namespace App\Http\Controllers\Router\Mikrotik;
 
 use App\Http\Controllers\Controller;
 use App\Models\MikrotikActivityLog;
@@ -17,6 +17,6 @@ class MikrotikActivityLogController extends Controller
             ->orderByDesc('id')
             ->paginate(25);
 
-        return view('dashboard.router.activity-log', compact('logs'));
+        return view('dashboard.activity.mikrotik-activity', compact('logs'));
     }
 }

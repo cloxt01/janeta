@@ -14,6 +14,6 @@ class OltActivityLogController extends Controller
             ->map(fn ($t) => OltActivityPresenter::make($t))
             ->values();
 
-        return view('dashboard.olt-activity', compact('initial'));
+        return view('dashboard.activity.olt-activity', compact('initial'));
     }
 }

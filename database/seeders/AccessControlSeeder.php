@@ -36,9 +36,9 @@ class AccessControlSeeder extends Seeder
                 ],
 
                 'Activity' => [
-                    'olt.activity.view'      => 'Melihat Aktivitas OLT',
-                    'mikrotik.activity.view' => 'Melihat Aktivitas MikroTik',
-                    'audit.view'             => 'Melihat Audit Logs',
+                    'activity.olt.view'      => 'Melihat Aktivitas OLT',
+                    'activity.mikrotik.view' => 'Melihat Aktivitas MikroTik',
+                    'activity.user.view'             => 'Melihat Aktivitas User',
                 ],
 
                 'OLT' => [
@@ -50,8 +50,8 @@ class AccessControlSeeder extends Seeder
                 ],
 
                 'Telegram' => [
-                    'telegram.view'   => 'Melihat Whitelist Telegram',
-                    'telegram.manage' => 'Mengelola Whitelist Telegram',
+                    'telegram.whitelist.view'   => 'Melihat Whitelist Telegram',
+                    'telegram.whitelist.manage' => 'Mengelola Whitelist Telegram',
                 ],
 
                 'Users' => [
@@ -83,6 +83,9 @@ class AccessControlSeeder extends Seeder
                     'router-mikrotik.test'    => 'Testing Koneksi Router MikroTik',
                 ],
 
+                'Tools' => [
+                    'tools.port-monitor' => 'Memantau Port',
+                ]
             ];
 
             $permissionIds = [];
@@ -175,9 +178,9 @@ class AccessControlSeeder extends Seeder
                     'ont.deactivate',
 
                     // Activity
-                    'olt.activity.view',
-                    'mikrotik.activity.view',
-                    'audit.view',
+                    'activity.olt.view',
+                    'activity.mikrotik.view',
+                    'activity.user.view',
 
                     // OLT Management
                     'olt.view',
@@ -187,8 +190,8 @@ class AccessControlSeeder extends Seeder
                     'olt.test',
 
                     // Telegram
-                    'telegram.view',
-                    'telegram.manage',
+                    'telegram.whitelist.view',
+                    'telegram.whitelist.manage',
 
                     // Users
                     'users.view',
@@ -225,19 +228,21 @@ class AccessControlSeeder extends Seeder
                     'ont.restart',
 
                     // Activity
-                    'olt.activity.view',
-                    'mikrotik.activity.view',
+//                    'activity.olt.view',
+
+                    // Tools
+                    'tools.port-monitor',
 
                     // OLT
-                    'olt.view',
+//                    'olt.view',
                     'olt.test',
 
                     // Location
                     'location.track',
 
                     // MikroTik
-                    'router-mikrotik.view',
-                    'router-mikrotik.show',
+//                    'router-mikrotik.view',
+//                    'router-mikrotik.show',
                 ],
 
                 // Customer Care
@@ -256,13 +261,13 @@ class AccessControlSeeder extends Seeder
                     'ont.processing',
 
                     // Activity
-                    'olt.activity.view',
+                    'activity.olt.view',
 
                     // OLT
                     'olt.view',
 
                     // Telegram
-                    'telegram.view',
+                    'telegram.whitelist.view',
 
                     // Location
                     'location.track',

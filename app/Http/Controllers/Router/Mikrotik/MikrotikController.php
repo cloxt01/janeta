@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Router;
+namespace App\Http\Controllers\Router\Mikrotik;
 
 use App\Http\Controllers\Controller;
 use App\Models\MikrotikRouter;
