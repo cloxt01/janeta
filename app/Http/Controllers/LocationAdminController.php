@@ -17,7 +17,7 @@ class LocationAdminController extends Controller
     {
         $totalUsers = User::count();
 
-        return view('location.live', compact('totalUsers'));
+        return view('dashboard.tools.live-location', compact('totalUsers'));
     }
 
     /**

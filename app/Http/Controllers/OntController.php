@@ -73,7 +73,7 @@ class OntController extends Controller
 
         $this->auditController->audit(
             $request,
-            'portal.'.$operation,
+            'ont.'.$operation,
             $message,
             $task
         );
@@ -148,7 +148,7 @@ class OntController extends Controller
     {
         $request = $this->findOwnedRequest($uuid);
 
-        return view('portal.ont-processing', [
+        return view('ont.ont-processing', [
             'request' => $request,
         ]);
     }
@@ -183,14 +183,14 @@ class OntController extends Controller
         $request = $this->findOwnedRequest($uuid);
 
         if (!in_array($request->status, ['completed', 'failed'], true)) {
-            return redirect()->route('portal.ont.processing', $request->uuid);
+            return redirect()->route('ont.ont.processing', $request->uuid);
         }
 
         if ($request->status === 'failed') {
-            return redirect()->route('portal.ont.processing', $request->uuid);
+            return redirect()->route('ont.ont.processing', $request->uuid);
         }
 
-        return view('portal.ont-result', [
+        return view('ont.ont-result', [
             'request' => $request,
         ]);
     }

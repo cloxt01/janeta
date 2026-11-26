@@ -79,7 +79,7 @@ class ToolsController extends Controller
             }
         }
 
-        return view('dashboard.olt-ports', compact(
+        return view('dashboard.tools.port-monitor', compact(
             'olts',
             'oltName',
             'frame',

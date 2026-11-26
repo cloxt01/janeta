@@ -23,7 +23,7 @@ class UserController extends Controller
 
     public function index(): View
     {
-        return view('dashboard.users', [
+        return view('dashboard.management.users', [
             'users' => User::with('roles')->latest()->paginate(15),
             'roles' => Role::orderBy('display_name')->get(),
         ]);
@@ -48,35 +48,19 @@ class UserController extends Controller
                 'string',
                 'min:8',
             ],
-            'hris_role' => [
-                'nullable',
-                Rule::in([
-                    'super_admin',
-                    'admin',
-                    'operator',
-                    'viewer',
-                ]),
+            'role_id' => [
+                'exists:roles,id',
             ],
         ]);
 
-        $hrisRole = $data['hris_role'] ?? 'operator';
-
-        $roleName = str_replace('_', '-', $hrisRole);
 
         $user = User::create([
             'name' => $data['name'],
             'email' => $data['email'],
-            'password' => $data['password'],
-            'role' => $hrisRole,
+            'password' => $data['password']
         ]);
 
-        $roleId = Role::where('name', $roleName)
-            ->value('id');
-
-        if ($roleId) {
-            $user->roles()->sync([$roleId]);
-        }
-
+        $user->roles()->sync([$request->role_id]);
         $this->auditController->audit(
             $request,
             'user.created',

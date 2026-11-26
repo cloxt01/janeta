@@ -41,7 +41,7 @@ class AccessControlController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('dashboard.access.index', compact(
+        return view('dashboard.management.access-control', compact(
             'roles',
             'permissions',
             'users'

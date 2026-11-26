@@ -52,8 +52,8 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     */
 
-    Route::prefix('portal/ont')
-        ->name('portal.ont.')
+    Route::prefix('ont/ont')
+        ->name('ont.ont.')
         ->middleware('permission:ont.processing')
         ->group(function () {
 
@@ -194,7 +194,7 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     */
 
-    Route::prefix('dashboard/management/telegram')
+    Route::prefix('dashboard/devices/telegram')
         ->name('telegram.whitelist.')
         ->group(function () {
 
@@ -269,7 +269,7 @@ Route::middleware('auth')->group(function () {
                 ->middleware('permission:access.view')
                 ->name('index');
 
-            // Role management
+            // Role devices
             Route::post('/roles', [AccessControlController::class, 'storeRole'])
                 ->middleware('permission:access.manage')
                 ->name('roles.store');

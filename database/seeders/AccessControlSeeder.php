@@ -125,8 +125,8 @@ class AccessControlSeeder extends Seeder
                     'description'  => 'Mengelola operasional dan pengguna JANETA.',
                 ],
 
-                'operator' => [
-                    'display_name' => 'Operator',
+                'noc' => [
+                    'display_name' => 'Network Operation Center',
                     'description'  => 'Mengelola operasional OLT dan ONT.',
                 ],
 
@@ -135,10 +135,10 @@ class AccessControlSeeder extends Seeder
                     'description'  => 'Mengakses informasi pelanggan dan ONT.',
                 ],
 
-                'viewer' => [
-                    'display_name' => 'Viewer',
-                    'description'  => 'Hanya memiliki hak akses melihat data.',
-                ],
+//                'viewer' => [
+//                    'display_name' => 'Viewer',
+//                    'description'  => 'Hanya memiliki hak akses melihat data.',
+//                ],
 
             ];
 
@@ -218,7 +218,7 @@ class AccessControlSeeder extends Seeder
                 ],
 
                 // Operasional jaringan
-                'operator' => [
+                'noc' => [
                     'dashboard.view',
 
                     // ONT
@@ -226,16 +226,12 @@ class AccessControlSeeder extends Seeder
                     'ont.processing',
                     'ont.control',
                     'ont.restart',
-
-                    // Activity
-//                    'activity.olt.view',
+                    'ont.activate',
+                    'ont.deactivate',
 
                     // Tools
                     'tools.port-monitor',
 
-                    // OLT
-//                    'olt.view',
-                    'olt.test',
 
                     // Location
                     'location.track',
@@ -250,28 +246,28 @@ class AccessControlSeeder extends Seeder
                     'dashboard.view',
                     'ont.lookup',
                     'ont.processing',
-
+                    'ont.restart',
                     'location.track',
                 ],
 
                 // Read only
-                'viewer' => [
-                    'dashboard.view',
-                    'ont.lookup',
-                    'ont.processing',
-
-                    // Activity
-                    'activity.olt.view',
-
-                    // OLT
-                    'olt.view',
-
-                    // Telegram
-                    'telegram.whitelist.view',
-
-                    // Location
-                    'location.track',
-                ],
+//                'viewer' => [
+//                    'dashboard.view',
+////                    'ont.lookup',
+//                    'ont.processing',
+//
+//                    // Activity
+////                    'activity.olt.view',
+//
+//                    // OLT
+////                    'olt.view',
+//
+//                    // Telegram
+////                    'telegram.whitelist.view',
+//
+//                    // Location
+//                    'location.track',
+//                ],
 
             ];
 

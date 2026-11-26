@@ -24,7 +24,7 @@ class MikrotikController extends Controller
     {
         $this->authorizePermission($request, 'mikrotik.view');
 
-        return view('dashboard.router.mikrotik', [
+        return view('dashboard.devices.mikrotik', [
             'title' => 'MikroTik',
             'devices' => MikrotikRouter::query()
                 ->orderBy('name')

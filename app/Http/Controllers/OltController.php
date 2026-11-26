@@ -31,7 +31,7 @@ class OltController extends Controller
 
     public function index(): View
     {
-        return view('dashboard.olts', [
+        return view('dashboard.devices.olts', [
             'olts' => Olt::latest()->paginate(15),
         ]);
     }
@@ -96,7 +96,7 @@ class OltController extends Controller
             }
         }
 
-        return view('dashboard.olt-ports', compact(
+        return view('dashboard.tools.port-monitor', compact(
             'olts',
             'oltName',
             'frame',
