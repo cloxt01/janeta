@@ -346,7 +346,7 @@
          */
         function redirectToProcessing(requestId) {
             if (!requestId) {
-                throw new Error('Request ID tidak ditemukan.');
+                throw new Error('Requests ID tidak ditemukan.');
             }
 
             const template = form.dataset.processingUrl;
@@ -597,7 +597,7 @@
         }
 
         /*
-         * Request control ONT.
+         * Requests control ONT.
          */
         async function submitOntAction(action) {
             if (!currentOntData) {
@@ -698,7 +698,7 @@
                     );
                 }
 
-                // Request diterima queue.
+                // Requests diterima queue.
                 if (response.status !== 202) {
                     throw new Error(
                         body.message ||
@@ -711,7 +711,7 @@
                 if (!requestId) {
                     throw new Error(
                         body.message ||
-                        'Request ID kontrol tidak ditemukan.'
+                        'Requests ID kontrol tidak ditemukan.'
                     );
                 }
 
@@ -824,7 +824,7 @@
                 if (!requestId) {
                     throw new Error(
                         body.message ||
-                        'Request ID lookup tidak ditemukan.'
+                        'Requests ID lookup tidak ditemukan.'
                     );
                 }
 

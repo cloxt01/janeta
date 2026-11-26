@@ -22,7 +22,8 @@ class UserController extends Controller
     public function index(): View
     {
         return view('dashboard.users', [
-            'users' => User::latest()->paginate(15),
+            'users' => User::with('roles')->latest()->paginate(15),
+            'roles' => Role::orderBy('display_name')->get(),
         ]);
     }
 
@@ -77,7 +78,8 @@ class UserController extends Controller
         $this->auditController->audit(
             $request,
             'user.created',
-            'Pengguna dashboard ditambahkan.'
+            'Pengguna dashboard ditambahkan.',
+            $user
         );
 
         return back()->with(

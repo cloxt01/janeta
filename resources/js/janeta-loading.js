@@ -111,7 +111,7 @@ function initJanetaLoading() {
         const states = {
             queued: {
                 title: 'Menunggu antrean...',
-                message: 'Request sudah masuk ke antrean JANETA.',
+                message: 'Requests sudah masuk ke antrean JANETA.',
                 label: 'Waiting for worker',
                 color: '#06B6D4',
             },
@@ -244,7 +244,7 @@ function initJanetaLoading() {
 
         cleanup();
 
-        title.textContent = 'Request berhasil!';
+        title.textContent = 'Requests berhasil!';
         message.textContent = 'Mengalihkan ke halaman hasil...';
         systemLabel.textContent = 'Completed';
 
@@ -268,7 +268,7 @@ function initJanetaLoading() {
 
         cleanup();
 
-        title.textContent = 'Request gagal';
+        title.textContent = 'Requests gagal';
         message.textContent = 'JANETA tidak dapat menyelesaikan operasi.';
         systemLabel.textContent = 'Operation failed';
 

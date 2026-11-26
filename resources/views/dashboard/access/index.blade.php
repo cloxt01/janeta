@@ -642,8 +642,8 @@
 
                                             <span class="ac-badge
                                                 {{ $userRole->name === 'super-admin' ? 'ac-badge-green' : 'ac-badge-gray' }}">
+                                                {{ $userRole->display_name ?: $userRole->name }}
                                             </span>
-
                                         @empty
 
                                             <span class="text-xs text-slate-500">
@@ -674,6 +674,145 @@
 
                                         </button>
 
+                                        {{-- PERMISSION KHUSUS --}}
+                                        <button type="button"
+                                                class="ac-btn ac-btn-secondary"
+                                                onclick="openUserPermissionModal(
+                                                {{ $managedUser->id }},
+                                                @js($managedUser->name),
+                                                @js($managedUser->directPermissions->mapWithKeys(fn ($permission) => [
+                                                    $permission->id => $permission->pivot->effect
+                                                ]))
+                                            )">
+
+                                            <i data-lucide="key-round" class="w-3.5 h-3.5"></i>
+                                            Permission Khusus
+                                        </button>
+
+                                        {{-- USER DIRECT PERMISSION MODAL --}}
+                                        <div id="userPermissionModal" class="ac-modal">
+
+                                            <div class="ac-card w-full max-w-3xl p-6">
+
+                                                {{-- HEADER --}}
+                                                <div class="flex justify-between items-center mb-5">
+
+                                                    <div>
+                                                        <h3 class="font-bold">
+                                                            Permission Khusus User
+                                                        </h3>
+
+                                                        <p id="userPermissionModalName"
+                                                           class="text-xs text-slate-500 mt-1"></p>
+                                                    </div>
+
+                                                    <button type="button"
+                                                            onclick="closeModal('userPermissionModal')"
+                                                            class="text-slate-400 hover:text-slate-900">
+                                                        <i data-lucide="x"></i>
+                                                    </button>
+
+                                                </div>
+
+                                                <div class="rounded-lg border border-blue-100 bg-blue-50 p-3 mb-5">
+                                                    <p class="text-xs text-blue-800 leading-relaxed">
+                                                        Atur hak akses khusus untuk user ini. Pengaturan langsung
+                                                        akan memiliki prioritas di atas permission dari role.
+                                                    </p>
+                                                </div>
+
+                                                <form id="userPermissionForm" method="POST">
+
+                                                    @csrf
+                                                    @method('PUT')
+
+                                                    <div class="space-y-6 max-h-[55vh] overflow-y-auto pr-2">
+
+                                                        @foreach($permissions as $module => $modulePermissions)
+
+                                                            <div>
+
+                                                                <div class="flex items-center justify-between border-b border-slate-200 pb-2 mb-3">
+
+                                                                    <h4 class="text-xs font-bold text-emerald-600 uppercase tracking-wider">
+                                                                        {{ $module }}
+                                                                    </h4>
+
+                                                                </div>
+
+                                                                <div class="space-y-2">
+
+                                                                    @foreach($modulePermissions as $permission)
+
+                                                                        <div class="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white p-3">
+
+                                                                            <div class="min-w-0">
+
+                                                                                <div class="text-xs font-semibold text-slate-800">
+                                                                                    {{ $permission->display_name }}
+                                                                                </div>
+
+                                                                                <div class="text-[10px] text-slate-400 mt-1">
+                                                                                    {{ $permission->name }}
+                                                                                </div>
+
+                                                                            </div>
+
+                                                                            <div class="w-32 shrink-0">
+
+                                                                                <select
+                                                                                    name="permissions[{{ $permission->id }}]"
+                                                                                    class="ac-input user-direct-permission"
+                                                                                    data-permission-id="{{ $permission->id }}"
+                                                                                >
+                                                                                    <option value="default">Default</option>
+                                                                                    <option value="grant">Grant</option>
+                                                                                    <option value="deny">Deny</option>
+                                                                                </select>
+
+                                                                            </div>
+
+                                                                        </div>
+
+                                                                    @endforeach
+
+                                                                </div>
+
+                                                            </div>
+
+                                                        @endforeach
+
+                                                    </div>
+
+                                                    <div class="flex items-center justify-between gap-3 mt-5 pt-4 border-t border-slate-200">
+
+                                                        <p class="text-[10px] text-slate-400">
+                                                            Default mengikuti permission role user.
+                                                        </p>
+
+                                                        <div class="flex justify-end gap-2">
+
+                                                            <button type="button"
+                                                                    onclick="closeModal('userPermissionModal')"
+                                                                    class="ac-btn ac-btn-secondary">
+                                                                Batal
+                                                            </button>
+
+                                                            <button type="submit"
+                                                                    class="ac-btn ac-btn-primary">
+                                                                <i data-lucide="save" class="w-4 h-4"></i>
+                                                                Simpan Permission
+                                                            </button>
+
+                                                        </div>
+
+                                                    </div>
+
+                                                </form>
+
+                                            </div>
+
+                                        </div>
                                     @else
 
                                         <span class="text-xs text-slate-500">Read only</span>
@@ -1057,6 +1196,36 @@
                     window.openModal('userModal');
                 };
 
+                /* =========================================================
+   USER DIRECT PERMISSIONS
+========================================================= */
+
+                window.openUserPermissionModal = function (id, name, directPermissions) {
+
+                    const form = document.getElementById('userPermissionForm');
+
+                    document.getElementById('userPermissionModalName').textContent =
+                        name;
+
+                    form.action =
+                        @js(url('/dashboard/access/users')) + '/' + id + '/permissions';
+
+                    const permissions = directPermissions || {};
+
+                    document.querySelectorAll('.user-direct-permission').forEach(select => {
+
+                        const permissionId = select.dataset.permissionId;
+
+                        select.value = permissions[permissionId] || 'default';
+
+                    });
+
+                    window.openModal('userPermissionModal');
+
+                    if (window.lucide) {
+                        window.lucide.createIcons();
+                    }
+                };
                 /* =========================================================
                    CLOSE MODAL
                 ========================================================= */

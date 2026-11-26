@@ -103,14 +103,16 @@ class WhitelistController extends Controller
         Request $request,
         WhitelistEntry $entry
     ): RedirectResponse {
+
+
+        $entry->delete();
+
         $this->auditController->audit(
             $request,
             'whitelist.deleted',
             'Whitelist Telegram '.$entry->chat_id.' dihapus.',
             $entry
         );
-
-        $entry->delete();
 
         return back()->with(
             'success',

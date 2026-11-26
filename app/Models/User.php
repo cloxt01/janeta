@@ -63,6 +63,12 @@ class User extends Authenticatable
             ->whereIn('name', $roles)
             ->exists();
     }
+    public function directPermissions()
+    {
+        return $this->belongsToMany(Permission::class, 'user_permissions')
+            ->withPivot('effect')
+            ->withTimestamps();
+    }
 
     public function hasPermission(string $permission): bool
     {
@@ -70,9 +76,21 @@ class User extends Authenticatable
             return true;
         }
 
+        $directEffect = $this->directPermissions()
+            ->where('permissions.name', $permission)
+            ->value('user_permissions.effect');
+
+        if ($directEffect === 'deny') {
+            return false;
+        }
+
+        if ($directEffect === 'grant') {
+            return true;
+        }
+
         return $this->roles()
             ->whereHas('permissions', function ($query) use ($permission) {
-                $query->where('name', $permission);
+                $query->where('permissions.name', $permission);
             })
             ->exists();
     }

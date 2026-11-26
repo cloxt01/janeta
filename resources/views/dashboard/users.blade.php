@@ -5,19 +5,7 @@
         $pageUsers = $users->count();
 //        $adminUsers = $users->getCollection()->where('is_admin', true)->count();
 
-        $roleLabels = [
-            'super_admin' => 'Super Admin',
-            'admin' => 'Admin',
-            'operator' => 'Operator',
-            'viewer' => 'Viewer',
-        ];
 
-        $roleColors = [
-            'super_admin' => 'bg-purple-50 text-purple-700',
-            'admin' => 'bg-amber-50 text-amber-700',
-            'operator' => 'bg-blue-50 text-blue-700',
-            'viewer' => 'bg-slate-100 text-slate-600',
-        ];
     @endphp
 
     <style>
@@ -181,6 +169,15 @@
 
         .usr-save:hover {
             background: #334155;
+        }
+        .usr-reset {
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #2563eb;
+        }
+
+        .usr-reset:hover {
+            background: #dbeafe;
         }
 
         .usr-delete {
@@ -413,22 +410,17 @@
                         Role <span class="text-rose-500">*</span>
                     </label>
 
-                    <select name="hris_role" required>
-                        <option value="operator" @selected(old('hris_role', 'operator') === 'operator')>
-                            Operator
-                        </option>
+                    <select name="role_id" required>
+                        <option value="">Pilih Role</option>
 
-                        <option value="admin" @selected(old('hris_role') === 'admin')>
-                            Admin
-                        </option>
-
-                        <option value="super_admin" @selected(old('hris_role') === 'super_admin')>
-                            Super Admin
-                        </option>
-
-                        <option value="viewer" @selected(old('hris_role') === 'viewer')>
-                            Viewer
-                        </option>
+                        @foreach($roles as $role)
+                            <option
+                                value="{{ $role->id }}"
+                                @selected(old('role_id') == $role->id)
+                            >
+                                {{ $role->display_name ?: $role->name }}
+                            </option>
+                        @endforeach
                     </select>
                 </div>
 
@@ -518,104 +510,87 @@
                                 {{-- ROLE --}}
                                 <td class="min-w-[190px]">
 
-                                    @php
-                                        $currentRole = $user->hris_role ?? $user->role ?? 'viewer';
-                                    @endphp
-
-                                    <div class="mb-2">
-                                        <span class="usr-role {{ $roleColors[$currentRole] ?? 'bg-slate-100 text-slate-600' }}">
-                                            {{ $roleLabels[$currentRole] ?? ucfirst($currentRole) }}
-                                        </span>
-                                    </div>
-
                                     <select
                                         form="update-user-{{ $user->id }}"
-                                        name="hris_role"
+                                        name="role_id"
                                         required
                                     >
-                                        @foreach($roleLabels as $role => $label)
+                                        <option value="">Pilih Role</option>
+
+                                        @foreach($roles as $role)
                                             <option
-                                                value="{{ $role }}"
-                                                @selected($currentRole === $role)
+                                                value="{{ $role->id }}"
+                                                @selected($user->roles->contains('id', $role->id))
                                             >
-                                                {{ $label }}
+                                                {{ $role->display_name ?: $role->name }}
                                             </option>
                                         @endforeach
                                     </select>
 
-{{--                                    <label class="mt-3 flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600">--}}
-{{--                                        <input--}}
-{{--                                            form="update-user-{{ $user->id }}"--}}
-{{--                                            type="checkbox"--}}
-{{--                                            name="is_admin"--}}
-{{--                                            value="1"--}}
-{{--                                            @checked($user->is_admin)--}}
-{{--                                            class="h-4 w-4 rounded accent-slate-700"--}}
-{{--                                        >--}}
-
-{{--                                        Akses administrator--}}
-{{--                                    </label>--}}
-
                                 </td>
 
-                                {{-- ACTIONS --}}
-                                <td class="min-w-[230px]">
 
-                                    <div class="flex flex-col items-end gap-2">
+                                {{-- ACTIONS --}}
+                                <td class="min-w-[260px]">
+
+                                    <div class="flex items-center justify-end gap-2 flex-wrap">
 
                                         {{-- UPDATE FORM --}}
                                         <form
                                             id="update-user-{{ $user->id }}"
                                             method="POST"
                                             action="{{ route('users.update', $user) }}"
-                                            class="w-full"
                                         >
                                             @csrf
                                             @method('PUT')
-
-                                            <input
-                                                type="password"
-                                                name="password"
-                                                placeholder="Password baru (opsional)"
-                                                autocomplete="new-password"
-                                                class="mb-2"
-                                            >
                                         </form>
 
-                                        <div class="flex items-center justify-end gap-2">
+                                        {{-- SIMPAN --}}
+                                        <button
+                                            type="submit"
+                                            form="update-user-{{ $user->id }}"
+                                            class="usr-action usr-save"
+                                        >
+                                            <i data-lucide="save" class="h-3.5 w-3.5"></i>
+                                            Simpan
+                                        </button>
+
+                                        {{-- RESET PASSWORD --}}
+                                        <button
+                                            type="button"
+                                            onclick="openResetPassword(
+                '{{ $user->id }}',
+                @js($user->name),
+                @js($user->email)
+            )"
+                                            class="usr-action usr-reset"
+                                        >
+                                            <i data-lucide="key-round" class="h-3.5 w-3.5"></i>
+                                            Reset Password
+                                        </button>
+
+                                        {{-- DELETE FORM --}}
+                                        <form
+                                            method="POST"
+                                            action="{{ route('users.destroy', $user) }}"
+                                            onsubmit="return confirm('Yakin ingin menghapus akun {{ addslashes($user->name) }}?')"
+                                        >
+                                            @csrf
+                                            @method('DELETE')
 
                                             <button
                                                 type="submit"
-                                                form="update-user-{{ $user->id }}"
-                                                class="usr-action usr-save"
+                                                class="usr-action usr-delete"
                                             >
-                                                <i data-lucide="save" class="h-3.5 w-3.5"></i>
-                                                Simpan
+                                                <i data-lucide="trash-2" class="h-3.5 w-3.5"></i>
+                                                Hapus
                                             </button>
-
-                                            {{-- DELETE FORM --}}
-                                            <form
-                                                method="POST"
-                                                action="{{ route('users.destroy', $user) }}"
-                                                onsubmit="return confirm('Yakin ingin menghapus akun {{ addslashes($user->name) }}?')"
-                                            >
-                                                @csrf
-                                                @method('DELETE')
-
-                                                <button
-                                                    type="submit"
-                                                    class="usr-action usr-delete"
-                                                >
-                                                    <i data-lucide="trash-2" class="h-3.5 w-3.5"></i>
-                                                    Hapus
-                                                </button>
-                                            </form>
-
-                                        </div>
+                                        </form>
 
                                     </div>
 
                                 </td>
+
 
                             </tr>
 
@@ -662,4 +637,147 @@
 
     </div>
 
+
+
+    {{-- RESET PASSWORD MODAL --}}
+    <div
+        id="resetPasswordModal"
+        class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+    >
+        <div class="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+
+            {{-- HEADER --}}
+            <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                <div class="flex items-center gap-3">
+                    <div class="rounded-lg bg-blue-50 p-2 text-blue-600">
+                        <i data-lucide="key-round" class="h-5 w-5"></i>
+                    </div>
+
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-900">
+                            Reset Password
+                        </h3>
+                        <p class="text-xs text-slate-500">
+                            Konfirmasi pengaturan ulang password
+                        </p>
+                    </div>
+                </div>
+
+                <button
+                    type="button"
+                    onclick="closeResetPassword()"
+                    class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            {{-- BODY --}}
+            <div class="space-y-4 p-5">
+
+                <div class="rounded-lg border border-blue-100 bg-blue-50/70 p-4">
+                    <p class="text-xs font-semibold text-blue-800">
+                        Informasi akun
+                    </p>
+
+                    <p id="resetUserName" class="mt-2 text-sm font-semibold text-slate-800"></p>
+
+                    <p id="resetUserEmail" class="mt-1 text-xs text-slate-500"></p>
+                </div>
+
+                <div>
+                    <p class="text-sm font-medium text-slate-700">
+                        Apakah Anda yakin ingin mereset password user ini?
+                    </p>
+
+                    <p class="mt-2 text-xs leading-relaxed text-slate-500">
+                        Password akun akan dikembalikan ke password default:
+                    </p>
+
+                    <div class="mt-3 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span class="text-xs font-medium text-slate-500">
+                        Password Default
+                    </span>
+
+                        <span class="font-mono text-sm font-bold tracking-wider text-slate-800">
+                        12345678
+                    </span>
+                    </div>
+                </div>
+
+            </div>
+
+            {{-- FOOTER --}}
+            <div class="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+
+                <button
+                    type="button"
+                    onclick="closeResetPassword()"
+                    class="usr-action border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                >
+                    Batal
+                </button>
+
+                <form
+                    id="resetPasswordForm"
+                    method="POST"
+                    action=""
+                >
+                    @csrf
+
+                    <button
+                        type="submit"
+                        class="usr-action usr-reset"
+                        onclick="return confirm('Yakin reset password user ini ke 12345678?')"
+                    >
+                        <i data-lucide="key-round" class="h-3.5 w-3.5"></i>
+                        Ya, Reset Password
+                    </button>
+                </form>
+
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+
+        function openResetPassword(id, name, email) {
+            const modal = document.getElementById('resetPasswordModal');
+            const form = document.getElementById('resetPasswordForm');
+
+            form.action = `/admin/users/${id}/password`;
+
+            document.getElementById('resetUserName').textContent = name;
+            document.getElementById('resetUserEmail').textContent = email;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            if (window.lucide) {
+                window.lucide.createIcons();
+            }
+        }
+
+        function closeResetPassword() {
+            const modal = document.getElementById('resetPasswordModal');
+
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        document.getElementById('resetPasswordModal')
+            .addEventListener('click', function(event) {
+                if (event.target === this) {
+                    closeResetPassword();
+                }
+            });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeResetPassword();
+            }
+        });
+
+    </script>
 </x-layouts.dashboard>

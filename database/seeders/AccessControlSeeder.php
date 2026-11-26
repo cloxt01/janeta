@@ -59,6 +59,7 @@ class AccessControlSeeder extends Seeder
                     'users.create' => 'Menambahkan Pengguna',
                     'users.update' => 'Mengubah Pengguna',
                     'users.delete' => 'Menghapus Pengguna',
+                    'users.password.reset'  => 'Mereset Password Pengguna',
                 ],
 
                 'Access Control' => [
@@ -194,6 +195,7 @@ class AccessControlSeeder extends Seeder
                     'users.create',
                     'users.update',
                     'users.delete',
+                    'users.password.reset',
 
                     // Access Control
                     'access.view',

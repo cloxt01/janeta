@@ -177,7 +177,7 @@
 
         <div class="min-w-0">
             <div class="text-sm font-bold {{ $isCompleted ? 'text-emerald-700' : 'text-rose-700' }}">
-                {{ $isCompleted ? 'Request berhasil diselesaikan' : 'Request tidak berhasil diselesaikan' }}
+                {{ $isCompleted ? 'Requests berhasil diselesaikan' : 'Requests tidak berhasil diselesaikan' }}
             </div>
 
             <p class="mt-0.5 text-xs text-slate-500">
@@ -295,7 +295,7 @@
                         <text x="400" y="502" text-anchor="middle" class="t-sub">{{ \Illuminate\Support\Str::limit($customerId, 22) }}</text>
                     </g>
 
-                    {{-- Request --}}
+                    {{-- Requests --}}
                     <path d="M630 319V398" stroke="#b5d98e" stroke-width="2"/>
                     <g data-target="request" tabindex="0" data-tip-title="Request" data-tip-sub="{{ strtoupper(str_replace('.', ' · ', $request->operation)) }} · {{ $request->duration_ms !== null ? number_format($request->duration_ms) . ' ms' : '-' }}" role="button" aria-label="Info request">
                         <rect class="hit" x="570" y="395" width="120" height="110"/>
@@ -440,7 +440,7 @@
                     </dl>
                 </div>
 
-                {{-- Request --}}
+                {{-- Requests --}}
                 <div data-panel="request" class="info-panel hidden">
                     <h2>Informasi Request</h2>
                     <p class="sub">Detail eksekusi request ke JANETA.</p>
@@ -853,7 +853,7 @@
                         const result = await response.json();
 
                         if (!response.ok) {
-                            let errorMessage = result.message || 'Request gagal dikirim.';
+                            let errorMessage = result.message || 'Requests gagal dikirim.';
                             if (result.errors) {
                                 errorMessage = Object.values(result.errors).flat().join(' ');
                             }
@@ -862,12 +862,12 @@
 
                         showControlMessage(
                             'success',
-                            'Request masuk antrean',
+                            'Requests masuk antrean',
                             result.message || `${config.title} berhasil dimasukkan ke antrean JANETA.`
                         );
                     } catch (error) {
                         console.error('[JANETA] ONT Control Error:', error);
-                        showControlMessage('error', 'Request gagal', error.message || 'Terjadi kesalahan saat mengirim request.');
+                        showControlMessage('error', 'Requests gagal', error.message || 'Terjadi kesalahan saat mengirim request.');
                     } finally {
                         setButtonLoading(button, false, action);
                     }

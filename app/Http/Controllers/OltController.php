@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Olt;
-use App\Models\AuditLog;
+use App\Services\Requests\OltManagementService;
 use App\Services\OltService;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
@@ -12,6 +12,17 @@ use Illuminate\View\View;
 
 class OltController extends Controller
 {
+    protected AuditController $auditController;
+    protected OltManagementService $oltManagementService;
+
+    public function __construct(
+        AuditController $auditController,
+        OltManagementService $oltManagementService
+    ) {
+        $this->auditController = $auditController;
+        $this->oltManagementService = $oltManagementService;
+    }
+
     /*
     |--------------------------------------------------------------------------
     | INDEX
@@ -55,7 +66,7 @@ class OltController extends Controller
         } else {
             $device = $olts->firstWhere('name', $oltName);
 
-            $this->audit(
+            $this->auditController->audit(
                 $request,
                 'olt.port_monitor',
                 'Port Monitor dijalankan untuk '.$oltName.' frame '.$frame.'.',
@@ -105,15 +116,12 @@ class OltController extends Controller
     {
         $data = $request->validate($this->oltRules($request));
 
-        $data['name'] = strtoupper($data['name']);
-        $data = $this->normalizeOltServices($data);
+        $result = $this->oltManagementService->create($data);
 
-        $olt = Olt::create($data);
+        $olt = $result['olt'];
+        $serviceResult = $result['result'];
 
-        $results = app(OltService::class)->testServices($olt);
-        $result = $this->summarizeServiceResults($results);
-
-        $this->audit(
+        $this->auditController->audit(
             $request,
             'olt.created',
             'OLT '.$olt->name.' ditambahkan.',
@@ -121,11 +129,10 @@ class OltController extends Controller
         );
 
         return back()->with(
-            $result['ok'] ? 'success' : 'error',
-            'OLT berhasil ditambahkan. '.$result['message']
+            $serviceResult['ok'] ? 'success' : 'error',
+            'OLT berhasil ditambahkan. '.$serviceResult['message']
         );
     }
-
     /*
     |--------------------------------------------------------------------------
     | VALIDATION RULES
@@ -179,109 +186,24 @@ class OltController extends Controller
 
         $data = $request->validate($rules);
 
-        $data['name'] = strtoupper($data['name']);
-        $data = $this->normalizeOltServices($data, $olt);
         $data['is_active'] = $request->boolean('is_active');
 
-        if (! $data['is_active']) {
-            $data['status'] = 'unknown';
-            $data['last_error'] = null;
-        }
+        $result = $this->oltManagementService->update($olt, $data);
 
-        $olt->update($data);
+        $olt = $result['olt'];
+        $serviceResult = $result['result'];
 
-        $this->audit(
+        $this->auditController->audit(
             $request,
             'olt.updated',
             'OLT '.$olt->name.' diperbarui.',
             $olt
         );
 
-        $result = $data['is_active']
-            ? $this->summarizeServiceResults(
-                app(OltService::class)->testServices($olt)
-            )
-            : [
-                'ok' => true,
-                'message' => 'OLT dinonaktifkan.',
-            ];
-
         return back()->with(
-            $result['ok'] ? 'success' : 'error',
-            'OLT berhasil diperbarui. '.$result['message']
+            $serviceResult['ok'] ? 'success' : 'error',
+            'OLT berhasil diperbarui. '.$serviceResult['message']
         );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | NORMALIZE SERVICES
-    |--------------------------------------------------------------------------
-    */
-
-    private function normalizeOltServices(
-        array $data,
-        ?Olt $olt = null
-    ): array {
-        $data['ssh_enabled'] = (bool) ($data['ssh_enabled'] ?? false);
-        $data['snmp_enabled'] = (bool) ($data['snmp_enabled'] ?? false);
-
-        $data['ssh_port'] = (int) ($data['ssh_port'] ?? 22);
-        $data['snmp_port'] = (int) ($data['snmp_port'] ?? 161);
-
-        $data['transport_type'] = 'tcp';
-
-        $data['connection_type'] =
-            $data['snmp_enabled'] && ! $data['ssh_enabled']
-                ? 'snmp'
-                : 'ssh';
-
-        $data['port'] = $data['connection_type'] === 'snmp'
-            ? $data['snmp_port']
-            : $data['ssh_port'];
-
-        $data['username'] = $data['connection_type'] === 'snmp'
-            ? ($data['snmp_community'] ?? '')
-            : ($data['ssh_username'] ?? '');
-
-        $data['password'] = $data['connection_type'] === 'ssh'
-            ? ($data['ssh_password'] ?? $olt?->ssh_password ?? '')
-            : '';
-
-        if ($olt && empty($data['ssh_password'])) {
-            $data['ssh_password'] = $olt->ssh_password;
-        }
-
-        if ($olt && empty($data['ssh_private_key'])) {
-            $data['ssh_private_key'] = $olt->ssh_private_key;
-        }
-
-        return $data;
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | SERVICE RESULT
-    |--------------------------------------------------------------------------
-    */
-
-    private function summarizeServiceResults(array $results): array
-    {
-        $failed = collect($results)->filter(
-            fn (array $result): bool => ! $result['ok']
-        );
-
-        return [
-            'ok' => $failed->isEmpty(),
-
-            'message' => $failed->isEmpty()
-                ? 'Seluruh service aktif berhasil terhubung.'
-                : 'Service gagal: '.$failed
-                    ->map(
-                        fn (array $result, string $service): string =>
-                            strtoupper($service).' - '.$result['message']
-                    )
-                    ->implode('; '),
-        ];
     }
 
     /*
@@ -290,34 +212,33 @@ class OltController extends Controller
     |--------------------------------------------------------------------------
     */
 
-    public function destroy(Olt $olt): RedirectResponse
+    public function destroy(Request $request, Olt $olt): RedirectResponse
     {
-        $this->audit(
-            request(),
+        $this->auditController->audit(
+            $request,
             'olt.deleted',
             'OLT '.$olt->name.' dihapus.',
             $olt
         );
 
-        $olt->delete();
+        $this->oltManagementService->delete($olt);
 
         return back()->with('success', 'OLT berhasil dihapus.');
     }
-
     /*
     |--------------------------------------------------------------------------
     | TEST CONNECTION
     |--------------------------------------------------------------------------
     */
 
-    public function test(Olt $olt, OltService $service): RedirectResponse
-    {
-        $result = $this->summarizeServiceResults(
-            $service->testServices($olt)
-        );
+    public function test(
+        Request $request,
+        Olt $olt
+    ): RedirectResponse {
+        $result = $this->oltManagementService->testServices($olt);
 
-        $this->audit(
-            request(),
+        $this->auditController->audit(
+            $request,
             'olt.connection_test',
             'Koneksi OLT '.$olt->name.' diuji: '.$result['message'].'.',
             $olt
@@ -328,65 +249,32 @@ class OltController extends Controller
             $olt->name.': '.$result['message']
         );
     }
-
     /*
     |--------------------------------------------------------------------------
     | TEST ALL CONNECTIONS
     |--------------------------------------------------------------------------
     */
 
-    public function testAll(OltService $service): RedirectResponse
+    public function testAll(Request $request): RedirectResponse
     {
-        $results = Olt::where('is_active', true)
-            ->get()
-            ->mapWithKeys(
-                fn (Olt $olt) => [
-                    $olt->name => $this->summarizeServiceResults(
-                        $service->testServices($olt)
-                    ),
-                ]
-            );
+        $result = $this->oltManagementService->testAll();
 
-        $failed = $results->filter(
-            fn (array $result) => ! $result['ok']
-        );
-
-        $this->audit(
-            request(),
+        $this->auditController->audit(
+            $request,
             'olt.connection_test_all',
-            $failed->isEmpty()
+            $result['ok']
                 ? 'Seluruh koneksi OLT aktif berhasil diuji.'
                 : 'Uji koneksi selesai dengan kegagalan pada: '
-                .$failed->keys()->implode(', ').'.'
+                .$result['failed']->keys()->implode(', ').'.'
         );
 
         return back()->with(
-            $failed->isEmpty() ? 'success' : 'error',
-            $failed->isEmpty()
+            $result['ok'] ? 'success' : 'error',
+            $result['ok']
                 ? 'Semua OLT aktif berhasil terhubung.'
-                : 'Sebagian koneksi gagal: '.$failed->keys()->implode(', ')
+                : 'Sebagian koneksi gagal: '
+                .$result['failed']->keys()->implode(', ')
         );
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | AUDIT
-    |--------------------------------------------------------------------------
-    */
-
-    private function audit(
-        Request $request,
-        string $action,
-        string $description,
-        ?object $subject = null
-    ): void {
-        AuditLog::create([
-            'user_id' => $request->user()?->id,
-            'action' => $action,
-            'subject_type' => $subject ? $subject::class : null,
-            'subject_id' => $subject?->id,
-            'description' => $description,
-            'ip_address' => $request->ip(),
-        ]);
-    }
 }

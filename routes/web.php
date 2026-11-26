@@ -7,6 +7,7 @@ use App\Http\Controllers\LocationAdminController;
 use App\Http\Controllers\Olt\OltActivityLogController;
 use App\Http\Controllers\OltController;
 use App\Http\Controllers\OntController;
+use App\Http\Controllers\PasswordController;
 use App\Http\Controllers\Router\MikrotikActivityLogController;
 use App\Http\Controllers\Router\MikrotikController;
 use App\Http\Controllers\UserController;
@@ -76,20 +77,19 @@ Route::middleware('auth')->group(function () {
         ->group(function () {
 
             Route::post('/control', [OntController::class, 'control'])
-                ->middleware('permission:ont.control')
                 ->name('control');
 
             Route::get('/lookup', [OntController::class, 'lookup'])
                 ->middleware('permission:ont.lookup')
                 ->name('lookup');
 
-            Route::get('/check-desc', [OntController::class, 'checkDescription'])
-                ->middleware('permission:ont.lookup')
-                ->name('check-desc');
+//            Route::get('/check-desc', [OntController::class, 'checkDescription'])
+//                ->middleware('permission:ont.lookup')
+//                ->name('check-desc');
 
-            Route::get('/version', [OntController::class, 'version'])
-                ->middleware('permission:ont.lookup')
-                ->name('version');
+//            Route::get('/version', [OntController::class, 'version'])
+//                ->middleware('permission:ont.lookup')
+//                ->name('version');
         });
 
 
@@ -237,6 +237,15 @@ Route::middleware('auth')->group(function () {
 
 
 
+    Route::get('settings/profile/password', [PasswordController::class, 'index'])
+        ->name('profile.password');
+
+    Route::put('settings/profile/password', [PasswordController::class, 'update'])
+        ->name('profile.password.update');
+
+    Route::put('/admin/users/{user}/password', [PasswordController::class, 'adminReset'])
+        ->middleware('admin')
+        ->name('admin.users.password.reset');
 
     /*
     |--------------------------------------------------------------------------
@@ -274,6 +283,10 @@ Route::middleware('auth')->group(function () {
             Route::put('/users/{user}/roles', [AccessControlController::class, 'updateUserRoles'])
                 ->middleware('permission:access.manage')
                 ->name('users.roles');
+
+            Route::put('/users/{user}/permissions', [AccessControlController::class, 'updateUserPermissions'])
+                ->middleware('permission:access.manage')
+                ->name('users.permissions');
         });
 
 });

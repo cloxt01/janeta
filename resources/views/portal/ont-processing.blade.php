@@ -176,7 +176,7 @@
             </a>
         </div>
 
-        {{-- Request information, understated --}}
+        {{-- Requests information, understated --}}
         <div class="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[10px] text-slate-400">
 
             <span class="font-mono">
