@@ -19,7 +19,7 @@
     <form id="ontSearchForm"
           data-api-url="{{ route('api.ont.lookup') }}"
           data-control-url="{{ route('api.ont.control') }}"
-          data-processing-url="{{ route('ont.ont.processing', ['uuid' => '__UUID__']) }}"
+          data-processing-url="{{ route('ont.processing', ['uuid' => '__UUID__']) }}"
           data-csrf="{{ csrf_token() }}"
           data-modem-url="{{ asset('images/modem') }}"
           class="mb-6 flex flex-col gap-2 sm:flex-row">
