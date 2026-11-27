@@ -6,6 +6,7 @@ use App\Events\OltActivityUpdated;
 use App\Events\OltServiceRequestUpdated;
 use App\Models\OltServiceRequest;
 use App\Models\OntAuditLog;
+use App\Services\BillingService;
 use App\Services\OltService;
 use App\Services\TelegramClient;
 use Illuminate\Bus\Queueable;
@@ -14,6 +15,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -29,6 +31,9 @@ class ProcessOltServices implements ShouldQueue
     public int $tries = 0;
     public int $timeout = 120;
     public bool $failOnTimeout = true;
+
+    /** Lama cache data ONT dari billing (detik). */
+    private const BILLING_CACHE_TTL = 300;
 
     /** Operasi baca: aman dijalankan paralel, tanpa lock. */
     private const READ_ONLY = [
@@ -89,8 +94,12 @@ class ProcessOltServices implements ShouldQueue
 
         return $value;
     }
-    public function handle(OltService $service, TelegramClient $telegram): void
-    {
+
+    public function handle(
+        OltService $service,
+        TelegramClient $telegram,
+        BillingService $billingService
+    ): void {
         $task = OltServiceRequest::findOrFail($this->requestId);
         $startedAt = microtime(true);
         $params = (array) ($task->payload ?? []);
@@ -194,10 +203,10 @@ class ProcessOltServices implements ShouldQueue
         // Kirim ke Telegram di luar try utama: kegagalan Telegram
         // tidak boleh mengubah status task yang sudah completed.
         if (!empty($params['chat_id'])) {
-            $this->safely(function () use ($telegram, $task, $result, $params) {
+            $this->safely(function () use ($telegram, $task, $result, $params, $billingService) {
                 $telegram->sendMessage(
                     $params['chat_id'],
-                    $this->formatTelegramResult($task->operation, $result),
+                    $this->formatTelegramResult($task->operation, $result, $billingService),
                     is_array($result) ? $this->telegramActionButtons($task->operation, $result) : null,
                     'HTML'
                 );
@@ -263,6 +272,48 @@ class ProcessOltServices implements ShouldQueue
     private function telegramEscape(mixed $value): string
     {
         return htmlspecialchars((string) ($value ?? '-'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    /**
+     * Ambil data ONT dari billing dengan aman:
+     * - memakai ID mentah (bukan hasil escape HTML)
+     * - error/timeout billing tidak menghalangi pesan hasil OLT
+     * - hasil sukses di-cache sebentar; hasil kosong/gagal tidak di-cache
+     *
+     * Pastikan BillingService::ontByDesc() memakai
+     * Http::timeout(5)->connectTimeout(3) agar tidak hang.
+     */
+    private function fetchOntData(BillingService $billingService, mixed $rawCustomerId): array
+    {
+        $id = trim((string) ($rawCustomerId ?? ''));
+        if ($id === '' || $id === '-') {
+            return [];
+        }
+
+        $cacheKey = 'billing:ont:' . md5($id);
+
+        try {
+            $cached = Cache::get($cacheKey);
+            if (is_array($cached) && $cached !== []) {
+                return $cached;
+            }
+
+            $data = $billingService->ontByDesc($id);
+            $data = is_array($data) ? $data : [];
+
+            if ($data !== []) {
+                Cache::put($cacheKey, $data, self::BILLING_CACHE_TTL);
+            }
+
+            return $data;
+        } catch (Throwable $e) {
+            Log::warning('JANETA billing ontByDesc gagal (diabaikan)', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
     }
 
     private function lookupOnt(OltService $service, array $params): ?array
@@ -363,7 +414,7 @@ class ProcessOltServices implements ShouldQueue
         return $text;
     }
 
-    private function formatTelegramResult(string $operation, mixed $result): string
+    private function formatTelegramResult(string $operation, mixed $result, BillingService $billingService): string
     {
         if (!$result || !is_array($result)) {
             return '❌ Data tidak ditemukan atau perangkat offline.';
@@ -401,7 +452,7 @@ class ProcessOltServices implements ShouldQueue
             $port = $this->telegramEscape($result['port'] ?? '0');
             $ontId = $this->telegramEscape($result['ontId'] ?? '0');
             $sn = $this->telegramEscape($result['sn'] ?? '-');
-            $runState = $this->telegramEscape(strtoupper($result['runState'] ?? '-'));
+            $runState = $this->telegramEscape(strtoupper((string) ($result['runState'] ?? '-')));
             $lastUpTime = $this->telegramEscape($result['lastUpTime'] ?? '-');
             $lastDownCause = $this->telegramEscape($result['lastDownCause'] ?? '-');
 
@@ -411,6 +462,19 @@ class ProcessOltServices implements ShouldQueue
                 . "Nama Pelanggan: <i>{$customerName}</i>\n"
                 . "Frame/Slot/Port:ID: <code>{$frame}/{$slot}/{$port}:{$ontId}</code>\n"
                 . "Serial Number: <code>{$sn}</code>\n";
+
+            // Pakai ID mentah untuk lookup billing, bukan $customerId yang sudah di-escape.
+            $ontData = $this->fetchOntData($billingService, $result['customerId'] ?? null);
+
+            $brand = $this->telegramEscape($ontData['brand'] ?? '-');
+            $wlanBand = $this->telegramEscape($ontData['wlan_band'] ?? '-');
+            $tipe = $this->telegramEscape($ontData['tipe'] ?? '-');
+
+            $customer .= "\n<b>[ DATA ONT ]</b>\n"
+                . "ONT ID: <code>{$ontId}</code>\n"
+                . "Brand: <i>{$brand}</i>\n"
+                . "Tipe: <code>{$tipe}</code>\n"
+                . "WLAN Band: <code>{$wlanBand}</code>\n";
 
             if (!$online) {
                 return $customer

@@ -52,8 +52,8 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     */
 
-    Route::prefix('ont/ont')
-        ->name('ont.ont.')
+    Route::prefix('ont')
+        ->name('ont.')
         ->middleware('permission:ont.processing')
         ->group(function () {
 
