@@ -95,15 +95,10 @@ class UserController extends Controller
                 'string',
                 'min:8',
             ],
-            'hris_role' => [
+            'role_id' => [
+                'exists:roles,id',
                 'required',
-                Rule::in([
-                    'super_admin',
-                    'admin',
-                    'operator',
-                    'viewer',
-                ]),
-            ],
+            ]
         ]);
 
         if (
@@ -114,9 +109,8 @@ class UserController extends Controller
             unset($data['password']);
         }
 
-        $data['role'] = $data['hris_role'];
-
         $user->update($data);
+        $user->roles()->sync([$request->role_id]);
 
         $this->auditController->audit($request,
             'user.updated',

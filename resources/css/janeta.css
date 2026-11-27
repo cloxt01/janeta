@@ -1,0 +1,840 @@
+/* ==========================================================================
+   JANETA - JangkauNet NetOps Assistant
+   Stylesheet terpusat: token, layout dashboard, dan komponen reusable.
+   Ganti warna cukup di bagian TOKENS.
+   ========================================================================== */
+
+/* ==========================================================================
+   1. TOKENS
+   ========================================================================== */
+
+:root {
+    color-scheme: dark;
+
+    /* Surface */
+    --jn-bg: #1f1f1f;
+    --jn-sidebar: #1c1c1c;
+    --jn-panel: #222222;
+    --jn-panel-hover: #292929;
+    --jn-surface: #1c1c1c;
+    --jn-surface-2: #242424;
+    --jn-active: #303030;
+
+    /* Garis */
+    --jn-border: #363636;
+    --jn-border-soft: rgba(255, 255, 255, .07);
+    --jn-line: #2e2e2e;
+    --jn-line-soft: #272727;
+    --jn-line-input: #3a3a3a;
+
+    /* Teks */
+    --jn-text: #e5e5e5;
+    --jn-text-strong: #f2f2f2;
+    --jn-text-muted: #8a8a8a;
+    --jn-muted: #929292;
+    --jn-subtle: #666666;
+
+    /* Aksen UI (biru) */
+    --jn-accent: #3b82f6;
+    --jn-accent-hover: #2563eb;
+    --jn-accent-soft: rgba(59, 130, 246, .14);
+
+    /* Status: ok */
+    --jn-ok: #4cd286;
+    --jn-ok-dot: #00a34a;
+    --jn-ok-bg: #14281d;
+    --jn-ok-border: #1f5a38;
+
+    /* Status: danger */
+    --jn-danger: #f08a8a;
+    --jn-danger-dot: #ef4444;
+    --jn-danger-bg: #2a1717;
+    --jn-danger-bg-hover: #361d1d;
+    --jn-danger-border: #5e2b2b;
+
+    /* Status: warn */
+    --jn-warn: #e0b155;
+    --jn-warn-bg: #2a2417;
+    --jn-warn-bg-hover: #352d1b;
+    --jn-warn-border: #5a4a22;
+
+    /* Dimensi */
+    --jn-sidebar-width: 260px;
+    --jn-topbar-height: 58px;
+    --jn-radius: 11px;
+}
+
+/* ==========================================================================
+   2. BASE
+   ========================================================================== */
+
+* {
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #444 transparent;
+}
+
+html {
+    min-height: 100%;
+    background: var(--jn-bg);
+}
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    background: var(--jn-bg);
+    color: var(--jn-text);
+    font-family: Geist, Inter, ui-sans-serif, system-ui,
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+/* Pastikan utility Tailwind `hidden` tetap menang atas komponen jn-* */
+[class*="jn-"].hidden {
+    display: none;
+}
+
+@keyframes jn-pulse {
+    50% { opacity: .5; }
+}
+
+/* ==========================================================================
+   3. APP SHELL
+   ========================================================================== */
+
+.jn-app {
+    min-height: 100vh;
+}
+
+/* ---------- Sidebar ---------- */
+
+.jn-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 100;
+    width: var(--jn-sidebar-width);
+    display: flex;
+    flex-direction: column;
+    background: var(--jn-sidebar);
+    border-right: 1px solid var(--jn-border);
+    transition: transform .25s ease;
+}
+
+.jn-sidebar-brand {
+    height: var(--jn-topbar-height);
+    min-height: var(--jn-topbar-height);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 18px;
+    background: var(--jn-bg);
+    border-bottom: 1px solid var(--jn-border);
+}
+
+.jn-sidebar-brand img {
+    max-height: 34px;
+    width: auto;
+    max-width: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.jn-brand-mark {
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    border-radius: 7px;
+    background: var(--jn-accent);
+}
+
+.jn-brand-mark img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.jn-brand-name {
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: -.3px;
+    color: #ededed;
+}
+
+.jn-sidebar-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 13px 12px 24px;
+}
+
+.jn-sidebar-section {
+    margin-top: 22px;
+}
+
+.jn-sidebar-section:first-child {
+    margin-top: 0;
+}
+
+.jn-section-label {
+    padding: 0 9px;
+    margin-bottom: 8px;
+    color: #888;
+    font-size: 12px;
+    font-weight: 550;
+}
+
+.jn-nav-item,
+.jn-nav-group > summary {
+    position: relative;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 0 10px;
+    border-radius: 7px;
+    color: #999;
+    font-size: 13.5px;
+    font-weight: 450;
+    cursor: pointer;
+    list-style: none;
+    transition: background .15s, color .15s;
+}
+
+.jn-nav-group > summary::-webkit-details-marker {
+    display: none;
+}
+
+.jn-nav-item:hover,
+.jn-nav-group > summary:hover {
+    background: var(--jn-panel-hover);
+    color: var(--jn-text-strong);
+}
+
+.jn-nav-item.active,
+.jn-nav-group.active > summary {
+    background: var(--jn-active);
+    color: #fff;
+}
+
+.jn-nav-item.active::before {
+    position: absolute;
+    left: 0;
+    top: 9px;
+    bottom: 9px;
+    width: 3px;
+    content: "";
+    border-radius: 0 4px 4px 0;
+    background: var(--jn-accent);
+}
+
+.jn-nav-item svg,
+.jn-nav-group > summary svg {
+    width: 17px;
+    height: 17px;
+    flex-shrink: 0;
+    stroke-width: 1.7;
+}
+
+.jn-nav-chevron {
+    width: 13px !important;
+    height: 13px !important;
+    margin-left: auto;
+    color: #777;
+    transition: transform .2s;
+}
+
+.jn-nav-group[open] > summary .jn-nav-chevron {
+    transform: rotate(90deg);
+}
+
+.jn-nav-children {
+    margin: 3px 0 5px 18px;
+    padding-left: 9px;
+    border-left: 1px solid var(--jn-line-input);
+}
+
+.jn-nav-children .jn-nav-item,
+.jn-nav-children .jn-nav-group > summary {
+    min-height: 35px;
+    font-size: 12.5px;
+}
+
+.jn-sidebar-footer {
+    padding: 12px 15px;
+    border-top: 1px solid var(--jn-border);
+    color: #777;
+    font-size: 11px;
+}
+
+.jn-sidebar-backdrop {
+    display: none;
+}
+
+/* ---------- Workspace ---------- */
+
+.jn-workspace {
+    min-height: 100vh;
+    margin-left: var(--jn-sidebar-width);
+}
+
+/* ---------- Topbar ---------- */
+
+.jn-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 80;
+    height: var(--jn-topbar-height);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 0 20px;
+    background: rgba(31, 31, 31, .96);
+    border-bottom: 1px solid var(--jn-border);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.jn-topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    min-width: 0;
+}
+
+.jn-page-heading {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ddd;
+    white-space: nowrap;
+}
+
+.jn-mobile-toggle {
+    display: none;
+    width: 32px;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--jn-border);
+    border-radius: 7px;
+    background: transparent;
+    color: #ddd;
+    cursor: pointer;
+}
+
+.jn-topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.jn-global-search {
+    width: min(430px, 40vw);
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    border: 1px solid var(--jn-border);
+    border-radius: 8px;
+    background: #202020;
+    color: #888;
+}
+
+.jn-global-search svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+}
+
+.jn-global-search input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: #eee;
+    font: inherit;
+    font-size: 13px;
+}
+
+.jn-global-search input::placeholder {
+    color: #858585;
+}
+
+.jn-account {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.jn-avatar {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--jn-active);
+    color: #bbb;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.jn-account-name {
+    max-width: 150px;
+    overflow: hidden;
+    color: #aaa;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.jn-logout {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #888;
+    cursor: pointer;
+}
+
+.jn-logout:hover {
+    background: rgba(255, 70, 70, .1);
+    color: #ff7777;
+}
+
+/* ---------- Content ---------- */
+
+.jn-main {
+    width: 100%;
+    max-width: 1800px;
+    min-height: calc(100vh - var(--jn-topbar-height));
+    margin: 0 auto;
+    padding: 25px 22px 35px;
+}
+
+.jn-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 17px;
+    color: #888;
+    font-size: 12px;
+}
+
+.jn-breadcrumb svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* Flash message (session success / error) */
+
+.jn-alert {
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    border: 1px solid;
+    border-radius: 8px;
+    font-size: 13px;
+}
+
+.jn-alert-success {
+    background: rgba(16, 185, 129, .07);
+    border-color: rgba(16, 185, 129, .2);
+    color: #6ee7b7;
+}
+
+.jn-alert-error {
+    background: rgba(244, 63, 94, .07);
+    border-color: rgba(244, 63, 94, .2);
+    color: #fda4af;
+}
+
+/* Card lama (dipertahankan untuk halaman yang sudah memakainya) */
+
+.jn-card {
+    background: var(--jn-panel);
+    border: 1px solid var(--jn-border);
+    border-radius: var(--jn-radius);
+}
+
+.jn-card-header {
+    padding: 17px 17px 0;
+}
+
+.jn-card-title {
+    color: var(--jn-text);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.jn-card-description {
+    margin-top: 4px;
+    color: #888;
+    font-size: 12px;
+}
+
+/* ---------- Pagination (Laravel) ---------- */
+
+.jn-pagination nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.jn-pagination nav > div:first-child {
+    color: #888;
+    font-size: 12px;
+}
+
+.jn-pagination nav > div:last-child > span,
+.jn-pagination nav > div:last-child > a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.jn-pagination a,
+.jn-pagination span[aria-current="page"] span,
+.jn-pagination span[aria-disabled="true"] span {
+    min-width: 32px;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 9px;
+    border: 1px solid var(--jn-border);
+    border-radius: 7px;
+    background: #252525;
+    color: #aaa;
+    font-size: 12px;
+}
+
+.jn-pagination a:hover {
+    background: var(--jn-active);
+    color: #fff;
+}
+
+.jn-pagination span[aria-current="page"] span {
+    background: var(--jn-accent-soft);
+    border-color: var(--jn-accent);
+    color: var(--jn-accent);
+}
+
+.jn-pagination span[aria-disabled="true"] span {
+    opacity: .4;
+}
+
+/* ==========================================================================
+   4. KOMPONEN REUSABLE
+   ========================================================================== */
+
+/* ---------- Section / card ---------- */
+
+.jn-section {
+    overflow: hidden;
+    background: var(--jn-surface);
+    border: 1px solid var(--jn-line);
+    border-radius: 1rem;
+}
+
+.jn-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: .75rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--jn-line);
+}
+
+.jn-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--jn-text-strong);
+}
+
+.jn-section-sub {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--jn-text-muted);
+}
+
+/* ---------- Baris <dl> ---------- */
+
+.jn-rows > * + * {
+    border-top: 1px solid var(--jn-line-soft);
+}
+
+.jn-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .75rem 1.25rem;
+}
+
+.jn-row dt {
+    font-size: 12px;
+    color: var(--jn-text-muted);
+}
+
+.jn-row dd {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--jn-text-strong);
+}
+
+/* ---------- Input ---------- */
+
+.jn-input {
+    height: 2.75rem;
+    width: 100%;
+    padding: 0 1.25rem 0 2.75rem;
+    border: 1px solid var(--jn-line-input);
+    border-radius: 999px;
+    background: var(--jn-surface);
+    color: var(--jn-text);
+    font-size: 14px;
+    outline: none;
+    transition: border-color .15s;
+}
+
+.jn-input::placeholder {
+    color: #777;
+}
+
+.jn-input:focus {
+    border-color: var(--jn-accent);
+}
+
+/* ---------- Tombol ---------- */
+
+.jn-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 2.25rem;
+    padding: 0 1.25rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+}
+
+.jn-btn:disabled {
+    cursor: not-allowed;
+    opacity: .5;
+}
+
+.jn-btn-lg {
+    height: 2.75rem;
+    padding: 0 1.75rem;
+    font-size: 14px;
+}
+
+.jn-btn-primary {
+    background: var(--jn-accent);
+    color: #fff;
+}
+
+.jn-btn-primary:hover:not(:disabled) {
+    background: var(--jn-accent-hover);
+}
+
+.jn-btn-warn {
+    background: var(--jn-warn-bg);
+    border-color: var(--jn-warn-border);
+    color: var(--jn-warn);
+}
+
+.jn-btn-warn:hover:not(:disabled) {
+    background: var(--jn-warn-bg-hover);
+}
+
+.jn-btn-danger {
+    background: var(--jn-danger-bg);
+    border-color: var(--jn-danger-border);
+    color: var(--jn-danger);
+}
+
+.jn-btn-danger:hover:not(:disabled) {
+    background: var(--jn-danger-bg-hover);
+}
+
+/* ---------- Pill / badge ---------- */
+
+.jn-pill {
+    display: inline-block;
+    padding: 2px .75rem;
+    border: 1px solid var(--jn-line-input);
+    border-radius: 999px;
+    background: var(--jn-surface-2);
+    color: #c4c4c4;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.jn-pill[data-state="ok"] {
+    background: var(--jn-ok-bg);
+    border-color: var(--jn-ok-border);
+    color: var(--jn-ok);
+}
+
+.jn-pill[data-state="bad"] {
+    background: var(--jn-danger-bg);
+    border-color: var(--jn-danger-border);
+    color: var(--jn-danger);
+}
+
+.jn-pill[data-state="warn"] {
+    background: var(--jn-warn-bg);
+    border-color: var(--jn-warn-border);
+    color: var(--jn-warn);
+}
+
+/* ---------- Notice (error / warning) ---------- */
+
+.jn-notice {
+    padding: .875rem 1.25rem;
+    border: 1px solid;
+    border-radius: 1rem;
+    font-size: 14px;
+}
+
+.jn-notice-danger {
+    background: var(--jn-danger-bg);
+    border-color: var(--jn-danger-border);
+    color: var(--jn-danger);
+}
+
+.jn-notice-warn {
+    background: var(--jn-warn-bg);
+    border-color: var(--jn-warn-border);
+    color: var(--jn-warn);
+}
+
+/* ---------- Status dot + teks (dikontrol lewat data-state) ---------- */
+
+.jn-dot {
+    width: .625rem;
+    height: .625rem;
+    border-radius: 50%;
+    background: #666;
+}
+
+.jn-dot[data-state="ok"] {
+    background: var(--jn-ok-dot);
+    animation: jn-pulse 2s cubic-bezier(.4, 0, .6, 1) infinite;
+}
+
+.jn-dot[data-state="bad"] {
+    background: var(--jn-danger-dot);
+}
+
+.jn-status-text {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    text-transform: capitalize;
+    color: var(--jn-text-strong);
+}
+
+.jn-status-text[data-state="ok"] {
+    color: var(--jn-ok);
+}
+
+.jn-status-text[data-state="bad"] {
+    color: var(--jn-danger);
+}
+
+/* ==========================================================================
+   5. RESPONSIVE
+   ========================================================================== */
+
+@media (max-width: 900px) {
+    .jn-sidebar {
+        transform: translateX(-100%);
+    }
+
+    .jn-sidebar.open {
+        transform: translateX(0);
+    }
+
+    .jn-sidebar-backdrop.show {
+        position: fixed;
+        inset: 0;
+        z-index: 90;
+        display: block;
+        background: rgba(0, 0, 0, .6);
+        backdrop-filter: blur(3px);
+    }
+
+    .jn-workspace {
+        margin-left: 0;
+    }
+
+    .jn-mobile-toggle {
+        display: flex;
+    }
+
+    .jn-main {
+        padding: 20px 16px 30px;
+    }
+}
+
+@media (max-width: 600px) {
+    .jn-topbar {
+        padding: 0 13px;
+    }
+
+    .jn-topbar-right {
+        gap: 10px;
+    }
+
+    .jn-global-search {
+        width: 36px;
+        height: 36px;
+        justify-content: center;
+        padding: 0;
+        border: 0;
+        background: transparent;
+    }
+
+    .jn-global-search input {
+        display: none;
+    }
+
+    .jn-account-name,
+    .jn-logout {
+        display: none;
+    }
+
+    .jn-main {
+        padding: 17px 12px 25px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+    }
+}

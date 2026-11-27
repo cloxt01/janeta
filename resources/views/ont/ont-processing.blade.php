@@ -5,8 +5,8 @@
         id="processingApp"
         class="pr-hero mx-auto flex min-h-[70vh] w-full max-w-4xl flex-col items-center justify-center px-4 py-10 sm:px-8"
         data-request-id="{{ $request->uuid }}"
-        data-status-url="{{ route('ont.ont.request-status', $request->uuid) }}"
-        data-result-url="{{ route('ont.ont.result', $request->uuid) }}"
+        data-status-url="{{ route('ont.request-status', $request->uuid) }}"
+        data-result-url="{{ route('ont.result', $request->uuid) }}"
         data-channel-user="{{ auth()->id() }}"
         data-created-ms="{{ $request->created_at ? $request->created_at->timestamp * 1000 : '' }}"
     >
