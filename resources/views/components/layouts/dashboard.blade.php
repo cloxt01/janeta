@@ -740,11 +740,7 @@
     <aside class="jn-sidebar" id="jnSidebar">
 
         <a href="{{ route('dashboard') }}" class="jn-sidebar-brand">
-            <div class="jn-brand-mark">
-                <img src="{{ asset('images/jangkaunet-logo.png') }}" alt="JANETA">
-            </div>
-
-            <span class="jn-brand-name">JANETA</span>
+                <img style="width: 150px;" src="{{ asset('images/jangkau-logo-light.png') }}" alt="JANETA">
         </a>
 
         <div class="jn-sidebar-scroll">
