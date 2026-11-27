@@ -22,7 +22,6 @@ class MikrotikController extends Controller
 
     public function index(Request $request): View
     {
-        $this->authorizePermission($request, 'mikrotik.view');
 
         return view('dashboard.devices.mikrotik', [
             'title' => 'MikroTik',
