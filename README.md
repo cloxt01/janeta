@@ -293,7 +293,7 @@ Task terjadwal didefinisikan di `routes/console.php`:
 | Task | Interval | Keterangan |
 |---|---|---|
 | `janeta:collect-snmp` | Setiap 5 menit | Mengumpulkan data SNMP. Output ditulis ke `storage/logs/collect-snmp.log`. |
-| `janeta-mikrotik-log-collector` | Setiap 5 detik | Mengirim job `CollectMikrotikLogs` ke queue `router` untuk setiap router Mikrotik yang `is_active` dan `api_enabled`. |
+| `janeta-mikrotik-log-collector` | Setiap 1 menit | Mengirim job `CollectMikrotikLogs` ke queue `router` untuk setiap router Mikrotik yang `is_active` dan `api_enabled`. |
 
 ### Menjalankan scheduler
 

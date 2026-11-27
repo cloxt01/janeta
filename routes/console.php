@@ -43,6 +43,6 @@ Schedule::call(function () {
         });
 
 })
-    ->everyFiveSeconds()
+    ->everyMinute()
     ->name('janeta-mikrotik-log-collector')
     ->withoutOverlapping(1);
